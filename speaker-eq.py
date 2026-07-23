@@ -482,8 +482,8 @@ def cmd_create(args):
         print_response(freqs, avg, "measured (average)")
         bands = design_eq(freqs, avg)
     out = os.path.join(PROFILES_DIR, f"{name}.conf")
-    write_profile(name, bands, args.boost, target_match, out)
-    ok(f"Wrote {out}  ({len(bands)} bands, +{args.boost} dB makeup)")
+    write_profile(name, bands, boost, target_match, out)
+    ok(f"Wrote {out}  ({len(bands)} bands, +{boost} dB makeup)")
     print("  This is a STARTING point. Edit it, then `install` and listen; re-measure to refine.")
 
 
