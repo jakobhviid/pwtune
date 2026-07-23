@@ -1,0 +1,4 @@
+# ci/pwtune.rb.tmpl is a Ruby Homebrew formula with @TOKEN@ placeholders, not a
+# Go template — GitHub Linguist guesses "goTemplate" from the .tmpl extension.
+# Classify it as Ruby so the repo's language bar reflects reality (Rust).
+ci/pwtune.rb.tmpl linguist-language=Ruby
