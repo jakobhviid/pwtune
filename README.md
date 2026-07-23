@@ -65,7 +65,7 @@ moves a draft into `calibrated/`; calibrated profiles are **final** — `edit` a
 | `install [name]` | Resolve the profile's target sink, deploy it, make it the default output. Prompts if no name. |
 | `edit [name]` | Open a **draft** profile in `$EDITOR`. Prompts if no name. |
 | `delete [name]` | Delete a **draft** profile (asks to confirm). Prompts if no name. |
-| `uninstall [name]` | Remove an installed profile. Prompts if no name. |
+| `uninstall [name]` | Remove a deployed EQ. The picker is sectioned — drafts / calibrated / **orphaned** (installed but the profile left the repo) / **other** EQ configs found on the system — so you can clean up leftovers too, not just current installs. |
 | `promote [name]` | Finalize a draft: **move** it into `calibrated/` (shipped, frozen). Prompts if no name. |
 
 Common options for `measure`/`create`: `--speaker <sink>`, `--mic <source>`

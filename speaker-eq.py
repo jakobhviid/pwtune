@@ -448,6 +448,35 @@ def installed_profiles():
                   if f.startswith(DEPLOY_PREFIX) and f.endswith(".conf"))
 
 
+def deployed_eq_configs():
+    """Every speaker-EQ filter-chain config currently in the PipeWire config dir,
+    so uninstall can clean up anything lingering — not just this tool's own installs.
+    Returns [(label, path, kind)] with kind in draft|shipped|orphan|external:
+      - our installs (eqlab-<name>.conf): kind = the source profile's tier, or
+        'orphan' if that profile is no longer in the repo.
+      - any OTHER .conf that is a filter-chain EQ (e.g. an old speaker-eq.conf /
+        monitor-eq.conf, or one deployed by another tool): kind = 'external'."""
+    out = []
+    if not os.path.isdir(CONF_D):
+        return out
+    for f in sorted(os.listdir(CONF_D)):
+        if not f.endswith(".conf"):
+            continue
+        path = os.path.join(CONF_D, f)
+        if f.startswith(DEPLOY_PREFIX):
+            name = f[len(DEPLOY_PREFIX):-5]
+            _, tier = find_profile(name)
+            out.append((name, path, tier or "orphan"))
+        else:
+            try:
+                txt = open(path).read()
+            except OSError:
+                continue
+            if "libpipewire-module-filter-chain" in txt and "effect_input" in txt:
+                out.append((f, path, "external"))   # label = filename (may collide with a bare name)
+    return out
+
+
 def pick(prompt, choices, default=None):
     """Numbered picker (menu to stderr). Enter accepts default; a name is echoed as-is."""
     print("Available:", file=sys.stderr)
@@ -462,6 +491,36 @@ def pick(prompt, choices, default=None):
         return default
     if ans.isdigit() and 1 <= int(ans) <= len(choices):
         return choices[int(ans) - 1]
+    return ans or None
+
+
+def pick_sections(prompt, sections, default=None):
+    """Picker split into labelled sections, e.g. drafts on top, calibrated below.
+    `sections` is a list of (header, [names]); numbering is continuous across them
+    so a single number selects. Enter accepts `default`; a typed name is echoed."""
+    flat = []
+    print(file=sys.stderr)
+    idx = 1
+    for header, names in sections:
+        if not names:
+            continue
+        print(f"  {header}:", file=sys.stderr)
+        for n in names:
+            mark = "   ← default (Enter)" if default and n == default else ""
+            print(f"    {idx}) {n}{mark}", file=sys.stderr)
+            flat.append(n)
+            idx += 1
+    if not flat:
+        return None
+    label = f"{prompt} [{default}]: " if default else f"{prompt}: "
+    try:
+        ans = input(label).strip()
+    except EOFError:
+        ans = ""
+    if not ans and default:
+        return default
+    if ans.isdigit() and 1 <= int(ans) <= len(flat):
+        return flat[int(ans) - 1]
     return ans or None
 
 
@@ -577,7 +636,9 @@ def cmd_install(args):
             info(f"Connected speaker detected → default profile '{p}'")
             default = p
             break
-    name = args.name or pick("Pick a profile to install", profs, default=default or profs[0])
+    sections = [("Drafts (work in progress)", draft_names()),
+                ("Calibrated (promoted / shipped)", _names_in(CALIBRATED_DIR))]
+    name = args.name or pick_sections("Pick a profile to install", sections, default=default or profs[0])
     if not name:
         warn("Nothing selected."); return
     path, tier = find_profile(name)
@@ -623,23 +684,37 @@ def cmd_install(args):
 
 
 def cmd_uninstall(args):
-    inst = installed_profiles()
-    if not inst:
-        warn("No installed lab profiles."); return
-    name = args.name or pick("Pick a profile to uninstall", inst, default=inst[0])
+    items = deployed_eq_configs()
+    if not items:
+        warn(f"No EQ configs are deployed in {CONF_D}."); return
+    buckets = {"draft": [], "shipped": [], "orphan": [], "external": []}
+    label_path = {}
+    for label, path, kind in items:
+        buckets[kind].append(label)
+        label_path[label] = path
+    sections = [
+        ("Drafts (work in progress)", buckets["draft"]),
+        ("Calibrated (promoted / shipped)", buckets["shipped"]),
+        ("Orphans (installed, but the profile is gone from the repo)", buckets["orphan"]),
+        ("Other EQ configs on this system (not from this tool)", buckets["external"]),
+    ]
+    order = buckets["draft"] + buckets["shipped"] + buckets["orphan"] + buckets["external"]
+    name = args.name or pick_sections("Pick an EQ to uninstall", sections, default=order[0])
     if not name:
         warn("Nothing selected."); return
-    dest = os.path.join(CONF_D, f"{DEPLOY_PREFIX}{name}.conf")
-    if not os.path.isfile(dest):
-        err(f"'{name}' is not installed."); sys.exit(1)
-    os.remove(dest)
-    ok(f"Removed {dest}")
+    # A CLI-given name is the profile name (eqlab-<name>.conf); a picked label may be
+    # a raw filename for an external config.
+    path = label_path.get(name) or os.path.join(CONF_D, f"{DEPLOY_PREFIX}{name}.conf")
+    if not os.path.isfile(path):
+        err(f"'{name}' is not installed."); return
+    os.remove(path)
+    ok(f"Removed {path}")
     info("Restarting PipeWire...")
     restart_pipewire()
-    print(f"\n  '{name}' EQ removed — audio goes straight to the speaker again.")
+    print("\n  EQ removed — audio goes straight to the speaker again.")
     next_steps(
-        ("Re-add it", run_cmd("install", name)),
         ("See all profiles", run_cmd("list")),
+        ("Install one", run_cmd("install")),
     )
 
 
