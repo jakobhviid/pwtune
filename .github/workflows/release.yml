@@ -1,0 +1,80 @@
+name: release
+
+# Build on every push to main, publish a versioned release, and auto-update the
+# Homebrew formula in jakobhviid/homebrew-tap. Zero manual steps once TAP_TOKEN
+# is set (a fine-grained PAT with Contents:write on the tap repo). Without it,
+# the build+release still run and the tap update is skipped with a warning.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+      - name: Build (static musl, via cross)
+        run: cross build --release --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          mkdir -p dist
+          tar czf "dist/speaker-eq-${{ matrix.target }}.tar.gz" \
+            -C "target/${{ matrix.target }}/release" speaker-eq
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          base=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([0-9]+\.[0-9]+).*/\1/')
+          VERSION="${base}.$(git rev-list --count HEAD)"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          gh release create "v$VERSION" art/*.tar.gz \
+            --title "v$VERSION" --notes "Automated build from ${GITHUB_SHA:0:7}" \
+            || gh release upload "v$VERSION" art/*.tar.gz --clobber
+      - name: Update Homebrew tap
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::warning::TAP_TOKEN not set — built & released, but skipping the tap update."
+            exit 0
+          fi
+          x=$(sha256sum art/speaker-eq-x86_64-unknown-linux-musl.tar.gz | awk '{print $1}')
+          a=$(sha256sum art/speaker-eq-aarch64-unknown-linux-musl.tar.gz | awk '{print $1}')
+          sed -e "s/@VERSION@/${VERSION}/g" -e "s/@X86_SHA@/${x}/g" -e "s/@ARM_SHA@/${a}/g" \
+            ci/speaker-eq.rb.tmpl > /tmp/speaker-eq.rb
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/jakobhviid/homebrew-tap" tap
+          mkdir -p tap/Formula
+          cp /tmp/speaker-eq.rb tap/Formula/speaker-eq.rb
+          cd tap
+          git config user.name "tap-bot"
+          git config user.email "tap-bot@users.noreply.github.com"
+          git add Formula/speaker-eq.rb
+          git commit -m "speaker-eq ${VERSION}" || { echo "no formula change"; exit 0; }
+          git push
