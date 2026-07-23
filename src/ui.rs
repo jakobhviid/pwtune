@@ -85,8 +85,8 @@ fn prompt_index(prompt: &str, choices: &[String], default: Option<&str>) -> Opti
     Some(ans)
 }
 
-/// How the user invoked us, so "next step" hints are copy-pasteable.
-/// The justfile exports PWTUNE_LAUNCHER=just; otherwise it's the binary name.
+/// Prefix for the copy-pasteable "next step" hints. Honors $PWTUNE_LAUNCHER (e.g.
+/// a wrapper can set it to its own name); defaults to the binary name.
 pub fn run_cmd(verb: &str, arg: &str) -> String {
     let launcher = std::env::var("PWTUNE_LAUNCHER").unwrap_or_else(|_| "pwtune".into());
     if arg.is_empty() {

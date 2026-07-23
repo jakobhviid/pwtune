@@ -38,7 +38,7 @@ enum Cmd {
         #[arg(long, default_value_t = dsp::DEFAULT_ITERATIONS)]
         iterations: usize,
     },
-    /// Measure + generate a starting profile in drafts/.
+    /// Measure + generate a starting profile (<name>.draft.conf) in the current folder.
     Create {
         name: Option<String>,
         #[arg(long)]
@@ -52,7 +52,7 @@ enum Cmd {
         #[arg(long, default_value_t = dsp::DEFAULT_ITERATIONS)]
         iterations: usize,
     },
-    /// List profiles (draft + shipped) and their install state.
+    /// List profiles in this folder (draft + calibrated) and their install state.
     List,
     /// Install a profile as an EQ output.
     Install {
@@ -66,7 +66,7 @@ enum Cmd {
     Delete { name: Option<String> },
     /// Remove a deployed EQ.
     Uninstall { name: Option<String> },
-    /// Finalize a draft: move it into calibrated/ (shipped, frozen).
+    /// Finalize a draft: rename it to <name>.calibrated.conf (frozen).
     Promote { name: Option<String> },
     /// (dev) Analyze a sweep+recording pair and print the response; for validation.
     #[command(hide = true)]
