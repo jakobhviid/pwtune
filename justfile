@@ -11,6 +11,9 @@ script := justfile_directory() + "/speaker-eq.py"
 venv    := justfile_directory() + "/.venv"
 vpy     := venv + "/bin/python"
 
+# So the tool's "Next:" hints show `just …` (how you're running it) rather than raw python
+export SPEAKER_EQ_LAUNCHER := "just"
+
 # Show available commands
 default:
     @just --list

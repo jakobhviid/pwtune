@@ -52,6 +52,19 @@ def ok(m):   print(f"{C['green']}✓ {m}{C['off']}")
 def warn(m): print(f"{C['yellow']}⚠ {m}{C['off']}")
 def err(m):  print(f"{C['red']}✗ {m}{C['off']}", file=sys.stderr)
 
+# How the user invoked us, so "next step" hints are copy-pasteable. The justfile
+# exports SPEAKER_EQ_LAUNCHER=just; running the script directly falls back to it.
+LAUNCHER = os.environ.get("SPEAKER_EQ_LAUNCHER", "python3 speaker-eq.py")
+
+def run_cmd(verb, arg=""):
+    return f"{LAUNCHER} {verb}" + (f" {arg}" if arg else "")
+
+def next_steps(*items):
+    """Print a short 'what to do next' block. Each item is (description, command|'')."""
+    print(f"\n{C['blue']}  Next:{C['off']}")
+    for desc, cmd in items:
+        print(f"    • {desc}:  {cmd}" if cmd else f"    • {desc}")
+
 
 # ─────────────────────────── device discovery ───────────────────────────────
 
@@ -448,6 +461,10 @@ def cmd_measure(args):
             np = _np()
             print_response(freqs, np.mean(measurements, axis=0), f"AVERAGE of {len(measurements)} passes")
     print("\nMeasurement complete — nothing changed.")
+    next_steps(
+        ("Build an EQ from a speaker like this", run_cmd("create")),
+        ("Install a profile you already have", run_cmd("install")),
+    )
 
 
 def cmd_create(args):
@@ -484,7 +501,14 @@ def cmd_create(args):
     out = os.path.join(PROFILES_DIR, f"{name}.conf")
     write_profile(name, bands, boost, target_match, out)
     ok(f"Wrote {out}  ({len(bands)} bands, +{boost} dB makeup)")
-    print("  This is a STARTING point. Edit it, then `install` and listen; re-measure to refine.")
+    print("  A starting point: the low/low-mid correction is measured; the top end")
+    print("  is a guess (the mic barely hears it) — refine it by ear.")
+    rel = os.path.join("profiles", f"{name}.conf")
+    next_steps(
+        ("Hear it", run_cmd("install", name)),
+        ("Tweak it", f"edit {rel} (Gain/Freq/Q are plain text), then re-run {run_cmd('install', name)}"),
+        ("Save it for other machines", run_cmd("promote", name)),
+    )
 
 
 def cmd_list(_args):
@@ -508,7 +532,11 @@ def cmd_list(_args):
         dot = "●" if connected else "○"
         extra = f"   [{' · '.join(tags)}]" if tags else ""
         print(f"  {dot} {p:<22}{desc}{extra}")
-    print("\n  ● speaker connected now    ○ not connected\n")
+    print("\n  ● speaker connected now    ○ not connected")
+    next_steps(
+        ("Install one", run_cmd("install") + "  (pick from the list)"),
+        ("Create a new one", run_cmd("create")),
+    )
 
 
 def cmd_install(args):
@@ -558,6 +586,13 @@ def cmd_install(args):
         ok(f"Default output set to {node}")
     else:
         warn("Loaded, but couldn't set default — pick it in your sound settings.")
+    print(f"\n  '{name}' is now your output — play something to hear it.")
+    rel = os.path.join("profiles", f"{name}.conf")
+    next_steps(
+        ("Re-tune", f"edit {rel}, then re-run {run_cmd('install', name)}"),
+        ("Turn it off", run_cmd("uninstall", name)),
+        ("Save it for other machines", run_cmd("promote", name)),
+    )
 
 
 def cmd_uninstall(args):
@@ -574,6 +609,11 @@ def cmd_uninstall(args):
     ok(f"Removed {dest}")
     info("Restarting PipeWire...")
     restart_pipewire()
+    print(f"\n  '{name}' EQ removed — audio goes straight to the speaker again.")
+    next_steps(
+        ("Re-add it", run_cmd("install", name)),
+        ("See all profiles", run_cmd("list")),
+    )
 
 
 def cmd_promote(args):
@@ -602,7 +642,9 @@ def cmd_promote(args):
     with open(path) as s, open(dest, "w") as d:
         d.write(s.read())
     ok(f"Promoted → {dest}")
-    print("  Now commit it in ReinstallScripts and deploy there with `just speaker-eq`.")
+    next_steps(
+        ("Deploy it", "in ReinstallScripts: commit the file, then run  just speaker-eq"),
+    )
 
 
 def main():
