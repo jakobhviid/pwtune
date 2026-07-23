@@ -386,8 +386,12 @@ fn cmd_edit(name: Option<String>) -> Result<()> {
         Some((_, Tier::Calibrated)) => {
             err(&format!("'{name}' is finalized (in calibrated/) and frozen — edit is for drafts only."));
             println!("  To change it, create a new draft (re-measure) and promote again.");
+            std::process::exit(1);
         }
-        None => err(&format!("Unknown profile '{name}'. Drafts: {}", drafts.join(", "))),
+        None => {
+            err(&format!("Unknown profile '{name}'. Drafts: {}", drafts.join(", ")));
+            std::process::exit(1);
+        }
     }
     Ok(())
 }
@@ -417,8 +421,12 @@ fn cmd_delete(name: Option<String>) -> Result<()> {
         }
         Some((_, Tier::Calibrated)) => {
             err(&format!("'{name}' is finalized (in calibrated/) and frozen — delete is for drafts only."));
+            std::process::exit(1);
         }
-        None => err(&format!("Unknown profile '{name}'. Drafts: {}", drafts.join(", "))),
+        None => {
+            err(&format!("Unknown profile '{name}'. Drafts: {}", drafts.join(", ")));
+            std::process::exit(1);
+        }
     }
     Ok(())
 }
@@ -461,7 +469,7 @@ fn cmd_uninstall(name: Option<String>) -> Result<()> {
         .unwrap_or_else(|| conf_d().join(format!("{DEPLOY_PREFIX}{name}.conf")));
     if !path.is_file() {
         err(&format!("'{name}' is not installed."));
-        return Ok(());
+        std::process::exit(1);
     }
     fs::remove_file(&path)?;
     ok(&format!("Removed {}", path.display()));
@@ -490,10 +498,10 @@ fn cmd_promote(name: Option<String>) -> Result<()> {
     if !src.is_file() {
         if calibrated_path(&name).is_file() {
             warn(&format!("'{name}' is already calibrated (frozen)."));
-        } else {
-            err(&format!("No draft named '{name}'. Drafts: {}", drafts.join(", ")));
+            return Ok(());
         }
-        return Ok(());
+        err(&format!("No draft named '{name}'. Drafts: {}", drafts.join(", ")));
+        std::process::exit(1);
     }
     let dest = calibrated_path(&name);
     if dest.exists() && !ask(&format!("{name}.calibrated.conf exists — overwrite?"), "n").to_lowercase().starts_with('y') {

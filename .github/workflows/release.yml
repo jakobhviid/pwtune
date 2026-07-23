@@ -19,7 +19,7 @@ jobs:
       matrix:
         target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Stamp version (so `pwtune --version` matches the release)
@@ -48,7 +48,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: actions/download-artifact@v4
@@ -65,6 +65,13 @@ jobs:
           gh release create "v$VERSION" art/*.tar.gz \
             --title "v$VERSION" --notes "Automated build from ${GITHUB_SHA:0:7}" \
             || gh release upload "v$VERSION" art/*.tar.gz --clobber
+      - name: Prune old releases (keep only the latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for t in $(gh release list --json tagName -q '.[].tagName' | grep -vx "v$VERSION"); do
+            gh release delete "$t" --cleanup-tag -y || true
+          done
       - name: Update Homebrew tap
         env:
           TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}

@@ -15,6 +15,10 @@ install, and remove.
 > your ears above ~1–2 kHz, and iterate: `measure` → edit → `install` → listen →
 > re-measure.
 
+Ready-made profiles for specific devices live in
+**[pipewire-speaker-profiles](https://github.com/jakobhviid/pipewire-speaker-profiles)**
+— install them with `pwtune` or by hand, and send finished ones there via PR.
+
 ## How it works: it operates on the current folder
 
 `pwtune` works on the `.conf` files in **whatever directory you run it in** —
@@ -96,6 +100,10 @@ speaker.
 - **Coexist.** Each profile gets its own node name, so several can be installed at
   once (e.g. a laptop EQ'ing both its internal speakers and an external monitor);
   switch between them in your sound settings.
+- **One install path per profile per machine.** Installing the *same* profile via
+  two different tools (e.g. `pwtune` and a separate provisioning script) drops two
+  files whose filter chains share a node name — PipeWire will conflict. Pick one
+  install path per machine.
 - **Makeup gain is broadband and digital.** `--boost` adds shelf stages that lift
   the whole spectrum. It has a hard ceiling at 0 dBFS — past that it clips rather
   than getting louder, so for clean loudness use the speaker's/monitor's own
