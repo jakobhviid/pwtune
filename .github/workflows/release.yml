@@ -20,6 +20,14 @@ jobs:
         target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Stamp version (so `pwtune --version` matches the release)
+        run: |
+          base=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([0-9]+\.[0-9]+).*/\1/')
+          v="${base}.$(git rev-list --count HEAD)"
+          sed -i -E "s/^version = \"[^\"]*\"/version = \"$v\"/" Cargo.toml
+          echo "stamped $v"
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
         with:

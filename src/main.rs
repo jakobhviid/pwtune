@@ -6,7 +6,7 @@ mod system;
 mod ui;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use profile::{
     calibrated_names, calibrated_path, conf_d, description, draft_names, draft_path, find_profile,
     input_node, profile_names, target_match, write_profile, Tier, DEPLOY_PREFIX,
@@ -21,7 +21,7 @@ use system::{
 use ui::{ask, err, info, next_steps, ok, pick, pick_sections, run_cmd, slugify, warn};
 
 #[derive(Parser)]
-#[command(name = "pwtune", about = "Measure, build, and install PipeWire speaker EQ profiles.", arg_required_else_help = true)]
+#[command(name = "pwtune", version, about = "Measure, build, and install PipeWire speaker EQ profiles.", arg_required_else_help = true)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -71,6 +71,12 @@ enum Cmd {
     /// (dev) Analyze a sweep+recording pair and print the response; for validation.
     #[command(hide = true)]
     DevAnalyze { sweep: String, rec: String },
+    /// Print a shell completion script (bash|zsh|fish|…) to stdout.
+    #[command(hide = true)]
+    Completions { shell: clap_complete::Shell },
+    /// Print a man page (roff) to stdout.
+    #[command(hide = true)]
+    Man,
 }
 
 fn s(p: &Path) -> &str {
@@ -531,5 +537,13 @@ fn main() -> Result<()> {
         Cmd::Uninstall { name } => cmd_uninstall(name),
         Cmd::Promote { name } => cmd_promote(name),
         Cmd::DevAnalyze { sweep, rec } => cmd_dev_analyze(&sweep, &rec),
+        Cmd::Completions { shell } => {
+            clap_complete::generate(shell, &mut Cli::command(), "pwtune", &mut std::io::stdout());
+            Ok(())
+        }
+        Cmd::Man => {
+            clap_mangen::Man::new(Cli::command()).render(&mut std::io::stdout())?;
+            Ok(())
+        }
     }
 }

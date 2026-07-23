@@ -1,22 +1,24 @@
 class Pwtune < Formula
   desc "Measure any speaker with any mic and build a PipeWire EQ profile"
-  homepage "https://github.com/jakobhviid/pipewire-speaker-calibration"
+  homepage "https://github.com/jakobhviid/pwtune"
   version "@VERSION@"
   license "MIT"
 
   on_linux do
     on_intel do
-      url "https://github.com/jakobhviid/pipewire-speaker-calibration/releases/download/v@VERSION@/pwtune-x86_64-unknown-linux-musl.tar.gz"
+      url "https://github.com/jakobhviid/pwtune/releases/download/v@VERSION@/pwtune-x86_64-unknown-linux-musl.tar.gz"
       sha256 "@X86_SHA@"
     end
     on_arm do
-      url "https://github.com/jakobhviid/pipewire-speaker-calibration/releases/download/v@VERSION@/pwtune-aarch64-unknown-linux-musl.tar.gz"
+      url "https://github.com/jakobhviid/pwtune/releases/download/v@VERSION@/pwtune-aarch64-unknown-linux-musl.tar.gz"
       sha256 "@ARM_SHA@"
     end
   end
 
   def install
     bin.install "pwtune"
+    generate_completions_from_executable(bin/"pwtune", "completions")
+    (man1/"pwtune.1").write Utils.safe_popen_read(bin/"pwtune", "man")
   end
 
   def caveats

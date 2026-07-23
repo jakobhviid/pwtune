@@ -1,10 +1,16 @@
 //! Terminal UI: logging, prompts, sectioned pickers, "next step" hints.
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, IsTerminal, Write};
 
-pub fn info(m: &str) { println!("\x1b[1;34m▸ {m}\x1b[0m"); }
-pub fn ok(m: &str) { println!("\x1b[1;32m✓ {m}\x1b[0m"); }
-pub fn warn(m: &str) { println!("\x1b[1;33m⚠ {m}\x1b[0m"); }
-pub fn err(m: &str) { eprintln!("\x1b[1;31m✗ {m}\x1b[0m"); }
+// Color only when the stream is a terminal and NO_COLOR isn't set (the de-facto
+// standard, https://no-color.org).
+fn no_color() -> bool { std::env::var_os("NO_COLOR").is_some() }
+fn c_out() -> bool { !no_color() && io::stdout().is_terminal() }
+fn c_err() -> bool { !no_color() && io::stderr().is_terminal() }
+
+pub fn info(m: &str) { if c_out() { println!("\x1b[1;34m▸ {m}\x1b[0m") } else { println!("▸ {m}") } }
+pub fn ok(m: &str) { if c_out() { println!("\x1b[1;32m✓ {m}\x1b[0m") } else { println!("✓ {m}") } }
+pub fn warn(m: &str) { if c_out() { println!("\x1b[1;33m⚠ {m}\x1b[0m") } else { println!("⚠ {m}") } }
+pub fn err(m: &str) { if c_err() { eprintln!("\x1b[1;31m✗ {m}\x1b[0m") } else { eprintln!("✗ {m}") } }
 
 fn read_line() -> String {
     let mut s = String::new();
@@ -92,7 +98,7 @@ pub fn run_cmd(verb: &str, arg: &str) -> String {
 
 /// Print a short "what to do next" block. Items are (description, command).
 pub fn next_steps(items: &[(&str, String)]) {
-    println!("\n\x1b[1;34m  Next:\x1b[0m");
+    println!("{}", if c_out() { "\n\x1b[1;34m  Next:\x1b[0m" } else { "\n  Next:" });
     for (desc, cmd) in items {
         if cmd.is_empty() {
             println!("    • {desc}");
