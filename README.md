@@ -15,41 +15,35 @@ as you like and A/B them by ear.
 > Trust the low / low-mid bands, use your ears above ~1–2 kHz, and iterate:
 > `measure` → edit the profile → `install` → listen → re-measure.
 
+Works on any desktop that uses PipeWire (GNOME, KDE, Sway, …) — it talks to the
+audio server, not the desktop.
+
 ## Dependencies
 
-| Need | Package | Notes |
-|------|---------|-------|
-| **PipeWire** as the audio server | `pipewire`, `wireplumber` | Default on most modern distros. Check: `pactl info \| grep "Server Name"` |
-| `paplay`, `parecord`, `pactl` | ships with `pipewire` / `pipewire-pulse` | Playback, recording, and device queries |
-| `wpctl` | `wireplumber` | Optional; not required |
-| **Python 3** + **NumPy** + **SciPy** | see below | Sweep generation and frequency analysis |
-| `just` | `just` | **Optional** — only for the `just` shortcuts. The Python CLI works without it. |
+| Need | When | Notes |
+|------|------|-------|
+| **PipeWire** (`paplay`, `parecord`, `pactl`) | **runtime** | The only runtime requirement. Ships with `pipewire`/`pipewire-pulse`, default on most modern distros. Check: `pactl info \| grep "Server Name"` |
+| **Rust** (`cargo`) | **build only** | To compile the binary once. Install via [rustup](https://rustup.rs) or your package manager (`brew install rust`, `dnf install cargo`, …). |
+| `just` | optional | Only for the `just` shortcuts; the binary works without it. |
 
-Install the Python libraries:
+There is **no runtime dependency on Python, NumPy, or SciPy** — the analysis
+(sweep synthesis, Welch PSD via FFT, EQ design) is built into the binary. Once
+compiled it's a single self-contained executable.
+
+## Build
 
 ```bash
-# Fedora
-sudo dnf install -y python3-numpy python3-scipy
-
-# Ubuntu/Debian
-sudo apt install -y python3-numpy python3-scipy
-
-# Arch
-sudo pacman -S python-numpy python-scipy
-
-# or, isolated in a venv (any distro)
-python3 -m venv .venv && . .venv/bin/activate && pip install numpy scipy
+cargo build --release        # or: just build
+# → ./target/release/speaker-eq
 ```
-
-`paplay`/`parecord`/`pactl` come with PipeWire on essentially every distro that
-uses it, so you usually don't need to install anything else.
 
 ## Usage
 
-The tool is the Python CLI — it's self-contained (no `just` required):
+The tool is the `speaker-eq` binary:
 
 ```bash
-python3 speaker-eq.py <command> [options]
+./target/release/speaker-eq <command> [options]
+# (put it on your PATH, or use the `just` shortcuts below)
 ```
 
 Profiles live in two folders: **`drafts/`** (scratch, where `create` writes —
@@ -81,7 +75,7 @@ CLI so you don't have to remember the exact invocation — it's a convenience
 wrapper only:
 
 ```bash
-just measure                     # → python3 speaker-eq.py measure
+just measure                     # → ./target/release/speaker-eq measure
 just create                      # guided: pick speaker/mic, name it, set boost
 just list
 just install                     # defaults to the connected speaker
@@ -162,10 +156,11 @@ reaching the real speaker.
 
 This grew out of
 [thinkpad-x1-carbon-pipewire-eq](https://github.com/jakobhviid/thinkpad-x1-carbon-pipewire-eq),
-which fixed one laptop's speakers. It's now a general tool for any speaker. Two
-profiles ship in `calibrated/` as examples: `thinkpad-x1carbon.conf` (that
-laptop's internal speakers) and `dell-u4025qw.conf` (a monitor's built-in
-speakers over HDMI/DisplayPort).
+which fixed one laptop's speakers. It's now a general tool for any speaker,
+rewritten from the original Python prototype into a single self-contained Rust
+binary (no NumPy/SciPy runtime). Two profiles ship in `calibrated/` as examples:
+`thinkpad-x1carbon.conf` (that laptop's internal speakers) and
+`dell-u4025qw.conf` (a monitor's built-in speakers over HDMI/DisplayPort).
 
 ## License
 

@@ -1,0 +1,21 @@
+[package]
+name = "speaker-eq"
+version = "0.1.0"
+edition = "2021"
+description = "Measure any speaker with any mic, build a PipeWire filter-chain EQ profile, and install/remove profiles."
+
+[[bin]]
+name = "speaker-eq"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+hound = "3"
+rustfft = "6"
+regex = "1"
+ctrlc = "3"
+anyhow = "1"
+
+[profile.release]
+opt-level = 3
+lto = true

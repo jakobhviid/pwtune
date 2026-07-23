@@ -1,63 +1,53 @@
-# Shortcuts over speaker-eq.py — the Python CLI is the actual tool; these recipes
-# just save typing and guide you. Every verb works with no arguments: it lists
-# what's available, defaults to the sensible choice for this machine, and prompts
-# for the rest. You don't need to remember device names or flags.
+# Thin shortcuts over the `speaker-eq` binary — the binary is the tool; these just
+# save typing and build it on first use. Building needs Rust (cargo); after that
+# it's a single self-contained binary with no runtime deps beyond PipeWire.
 #
-# `measure` and `create` need NumPy/SciPy; the first time you run either, a local
-# .venv is created and the libraries installed automatically. The other verbs
-# don't need them and run on the system python3.
+# Every verb runs with no arguments too: it enumerates what's available, defaults
+# to the sensible choice for this machine, and prompts for the rest.
 
-script := justfile_directory() + "/speaker-eq.py"
-venv    := justfile_directory() + "/.venv"
-vpy     := venv + "/bin/python"
-
-# So the tool's "Next:" hints show `just …` (how you're running it) rather than raw python
 export SPEAKER_EQ_LAUNCHER := "just"
+export SPEAKER_EQ_HOME := justfile_directory()
+bin := justfile_directory() + "/target/release/speaker-eq"
 
-# Show available commands
+# Show available recipes
 default:
     @just --list
 
-# (internal) create the local Python env with numpy+scipy on first use
-_deps:
-    #!/usr/bin/env bash
-    set -e
-    if [[ ! -x "{{vpy}}" ]]; then
-        echo "First run: setting up a local Python environment (numpy + scipy)…"
-        python3 -m venv "{{venv}}"
-        "{{vpy}}" -m pip install -q --upgrade pip
-        "{{vpy}}" -m pip install -q numpy scipy
-        echo "…done."
-    fi
+# Build the release binary (recompiles only when sources change)
+build:
+    cargo build --release --manifest-path "{{justfile_directory()}}/Cargo.toml"
 
-# Play a sweep and show the frequency response (guides you through speaker+mic; no changes)
-measure *args: _deps
-    "{{vpy}}" "{{script}}" measure {{args}}
+_build:
+    @cargo build --release --quiet --manifest-path "{{justfile_directory()}}/Cargo.toml"
 
-# Measure and generate a starting profile (prompts for name, boost, speaker, mic)
-create *args: _deps
-    "{{vpy}}" "{{script}}" create {{args}}
+# Play a sweep and print the frequency response (no changes)
+measure *args: _build
+    "{{bin}}" measure {{args}}
 
-# List profiles and show which are installed / which is the active output
-list:
-    python3 "{{script}}" list
+# Measure + generate a starting profile -> drafts/<name>.conf (prompts for name/boost)
+create *args: _build
+    "{{bin}}" create {{args}}
 
-# Install a profile as an EQ output (no name → pick from a list, defaults to the connected speaker)
-install name="":
-    python3 "{{script}}" install {{name}}
+# List profiles (draft + shipped) and their install state
+list: _build
+    "{{bin}}" list
 
-# Edit a draft profile in $EDITOR (no name → pick). Calibrated profiles are frozen.
-edit name="":
-    python3 "{{script}}" edit {{name}}
+# Install a profile as an EQ output (no name → pick, defaults to the connected speaker)
+install name="": _build
+    "{{bin}}" install {{name}}
 
-# Delete a draft profile (no name → pick, asks to confirm). Calibrated profiles are frozen.
-delete name="":
-    python3 "{{script}}" delete {{name}}
+# Edit a draft profile in $EDITOR (calibrated ones are frozen)
+edit name="": _build
+    "{{bin}}" edit {{name}}
 
-# Remove an installed profile (no name → pick from installed ones)
-uninstall name="":
-    python3 "{{script}}" uninstall {{name}}
+# Delete a draft profile (calibrated ones are frozen)
+delete name="": _build
+    "{{bin}}" delete {{name}}
 
-# Finalize a draft: move it into calibrated/ (shipped, frozen). No name → pick.
-promote name="":
-    python3 "{{script}}" promote {{name}}
+# Remove a deployed EQ (no name → sectioned pick; also lists orphaned/foreign configs)
+uninstall name="": _build
+    "{{bin}}" uninstall {{name}}
+
+# Finalize a draft: move it into calibrated/ (shipped, frozen)
+promote name="": _build
+    "{{bin}}" promote {{name}}
