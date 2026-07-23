@@ -278,6 +278,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pwtune"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "ctrlc",
+ "hound",
+ "regex",
+ "rustfft",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -327,18 +339,6 @@ dependencies = [
  "primal-check",
  "strength_reduce",
  "transpose",
-]
-
-[[package]]
-name = "speaker-eq"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "ctrlc",
- "hound",
- "regex",
- "rustfft",
 ]
 
 [[package]]

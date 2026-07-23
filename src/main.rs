@@ -1,4 +1,4 @@
-//! speaker-eq — measure any speaker with any mic, build a PipeWire filter-chain
+//! pwtune — measure any speaker with any mic, build a PipeWire filter-chain
 //! EQ profile, and install/remove profiles. Rust port of the original Python tool.
 mod dsp;
 mod profile;
@@ -21,7 +21,7 @@ use system::{
 use ui::{ask, err, info, next_steps, ok, pick, pick_sections, run_cmd, slugify, warn};
 
 #[derive(Parser)]
-#[command(name = "speaker-eq", about = "Measure, build, and install PipeWire speaker EQ profiles.")]
+#[command(name = "pwtune", about = "Measure, build, and install PipeWire speaker EQ profiles.")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -78,7 +78,7 @@ fn s(p: &Path) -> &str {
 }
 
 fn tmpdir() -> PathBuf {
-    let d = std::env::temp_dir().join(format!("speaker-eq-{}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("pwtune-{}", std::process::id()));
     let _ = fs::create_dir_all(&d);
     d
 }
@@ -504,7 +504,7 @@ fn cmd_promote(name: Option<String>) -> Result<()> {
     println!("  It's frozen now (edit/delete won't touch it) and ships with the repo.");
     next_steps(&[
         ("Publish it", "git add calibrated/ && commit && push".to_string()),
-        ("Deploy on a machine", "in ReinstallScripts: just eq-import, then just speaker-eq".to_string()),
+        ("Deploy on a machine", "in ReinstallScripts: just eq-import, then just pwtune".to_string()),
     ]);
     Ok(())
 }

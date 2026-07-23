@@ -34,15 +34,15 @@ compiled it's a single self-contained executable.
 
 ```bash
 cargo build --release        # or: just build
-# → ./target/release/speaker-eq
+# → ./target/release/pwtune
 ```
 
 ## Usage
 
-The tool is the `speaker-eq` binary:
+The tool is the `pwtune` binary:
 
 ```bash
-./target/release/speaker-eq <command> [options]
+./target/release/pwtune <command> [options]
 # (put it on your PATH, or use the `just` shortcuts below)
 ```
 
@@ -75,7 +75,7 @@ CLI so you don't have to remember the exact invocation — it's a convenience
 wrapper only:
 
 ```bash
-just measure                     # → ./target/release/speaker-eq measure
+just measure                     # → ./target/release/pwtune measure
 just create                      # guided: pick speaker/mic, name it, set boost
 just list
 just install                     # defaults to the connected speaker

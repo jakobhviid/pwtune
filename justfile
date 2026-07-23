@@ -1,13 +1,13 @@
-# Thin shortcuts over the `speaker-eq` binary — the binary is the tool; these just
+# Thin shortcuts over the `pwtune` binary — the binary is the tool; these just
 # save typing and build it on first use. Building needs Rust (cargo); after that
 # it's a single self-contained binary with no runtime deps beyond PipeWire.
 #
 # Every verb runs with no arguments too: it enumerates what's available, defaults
 # to the sensible choice for this machine, and prompts for the rest.
 
-export SPEAKER_EQ_LAUNCHER := "just"
-export SPEAKER_EQ_HOME := justfile_directory()
-bin := justfile_directory() + "/target/release/speaker-eq"
+export PWTUNE_LAUNCHER := "just"
+export PWTUNE_HOME := justfile_directory()
+bin := justfile_directory() + "/target/release/pwtune"
 
 # Show available recipes
 default:

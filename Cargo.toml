@@ -1,11 +1,11 @@
 [package]
-name = "speaker-eq"
+name = "pwtune"
 version = "0.1.0"
 edition = "2021"
 description = "Measure any speaker with any mic, build a PipeWire filter-chain EQ profile, and install/remove profiles."
 
 [[bin]]
-name = "speaker-eq"
+name = "pwtune"
 path = "src/main.rs"
 
 [dependencies]

@@ -80,9 +80,9 @@ fn prompt_index(prompt: &str, choices: &[String], default: Option<&str>) -> Opti
 }
 
 /// How the user invoked us, so "next step" hints are copy-pasteable.
-/// The justfile exports SPEAKER_EQ_LAUNCHER=just; otherwise it's the binary name.
+/// The justfile exports PWTUNE_LAUNCHER=just; otherwise it's the binary name.
 pub fn run_cmd(verb: &str, arg: &str) -> String {
-    let launcher = std::env::var("SPEAKER_EQ_LAUNCHER").unwrap_or_else(|_| "speaker-eq".into());
+    let launcher = std::env::var("PWTUNE_LAUNCHER").unwrap_or_else(|_| "pwtune".into());
     if arg.is_empty() {
         format!("{launcher} {verb}")
     } else {

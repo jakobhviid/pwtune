@@ -29,8 +29,8 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist
-          tar czf "dist/speaker-eq-${{ matrix.target }}.tar.gz" \
-            -C "target/${{ matrix.target }}/release" speaker-eq
+          tar czf "dist/pwtune-${{ matrix.target }}.tar.gz" \
+            -C "target/${{ matrix.target }}/release" pwtune
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
@@ -65,16 +65,16 @@ jobs:
             echo "::warning::TAP_TOKEN not set — built & released, but skipping the tap update."
             exit 0
           fi
-          x=$(sha256sum art/speaker-eq-x86_64-unknown-linux-musl.tar.gz | awk '{print $1}')
-          a=$(sha256sum art/speaker-eq-aarch64-unknown-linux-musl.tar.gz | awk '{print $1}')
+          x=$(sha256sum art/pwtune-x86_64-unknown-linux-musl.tar.gz | awk '{print $1}')
+          a=$(sha256sum art/pwtune-aarch64-unknown-linux-musl.tar.gz | awk '{print $1}')
           sed -e "s/@VERSION@/${VERSION}/g" -e "s/@X86_SHA@/${x}/g" -e "s/@ARM_SHA@/${a}/g" \
-            ci/speaker-eq.rb.tmpl > /tmp/speaker-eq.rb
+            ci/pwtune.rb.tmpl > /tmp/pwtune.rb
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/jakobhviid/homebrew-tap" tap
           mkdir -p tap/Formula
-          cp /tmp/speaker-eq.rb tap/Formula/speaker-eq.rb
+          cp /tmp/pwtune.rb tap/Formula/pwtune.rb
           cd tap
           git config user.name "tap-bot"
           git config user.email "tap-bot@users.noreply.github.com"
-          git add Formula/speaker-eq.rb
-          git commit -m "speaker-eq ${VERSION}" || { echo "no formula change"; exit 0; }
+          git add Formula/pwtune.rb
+          git commit -m "pwtune ${VERSION}" || { echo "no formula change"; exit 0; }
           git push
