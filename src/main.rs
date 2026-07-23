@@ -8,7 +8,7 @@ mod ui;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use profile::{
-    calibrated_dir, calibrated_names, conf_d, description, draft_names, drafts_dir, find_profile,
+    calibrated_names, calibrated_path, conf_d, description, draft_names, draft_path, find_profile,
     input_node, profile_names, target_match, write_profile, Tier, DEPLOY_PREFIX,
 };
 use std::fs;
@@ -21,7 +21,7 @@ use system::{
 use ui::{ask, err, info, next_steps, ok, pick, pick_sections, run_cmd, slugify, warn};
 
 #[derive(Parser)]
-#[command(name = "pwtune", about = "Measure, build, and install PipeWire speaker EQ profiles.")]
+#[command(name = "pwtune", about = "Measure, build, and install PipeWire speaker EQ profiles.", arg_required_else_help = true)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -218,7 +218,7 @@ fn cmd_create(
     let avg = average(&rows);
     dsp::print_response(&freqs, &avg, "measured (average)");
     let bands = dsp::design_eq(&freqs, &avg);
-    let out = drafts_dir().join(format!("{name}.conf"));
+    let out = draft_path(&name);
     write_profile(&name, &bands, boost, &target, &out)?;
     ok(&format!("Wrote draft {}  ({} bands, +{boost} dB makeup)", out.display(), bands.len()));
     println!("  A starting point: the low/low-mid correction is measured; the top end");
@@ -244,7 +244,7 @@ fn cmd_list() -> Result<()> {
         let desc = description(&path);
         let connected = target_match(&path).map(|m| !resolve_sink(&m).is_empty()).unwrap_or(false);
         let node = input_node(&path);
-        let mut tags = vec![if tier == Tier::Shipped { "shipped" } else { "draft" }.to_string()];
+        let mut tags = vec![if tier == Tier::Calibrated { "calibrated" } else { "draft" }.to_string()];
         if conf_d().join(format!("{DEPLOY_PREFIX}{p}.conf")).is_file() {
             tags.push("installed".into());
         }
@@ -377,7 +377,7 @@ fn cmd_edit(name: Option<String>) -> Result<()> {
             let _ = Command::new(prog).args(parts).arg(&path).status();
             next_steps(&[("Try your changes", run_cmd("install", &name))]);
         }
-        Some((_, Tier::Shipped)) => {
+        Some((_, Tier::Calibrated)) => {
             err(&format!("'{name}' is finalized (in calibrated/) and frozen — edit is for drafts only."));
             println!("  To change it, create a new draft (re-measure) and promote again.");
         }
@@ -409,7 +409,7 @@ fn cmd_delete(name: Option<String>) -> Result<()> {
             fs::remove_file(&path)?;
             ok(&format!("Deleted drafts/{name}.conf"));
         }
-        Some((_, Tier::Shipped)) => {
+        Some((_, Tier::Calibrated)) => {
             err(&format!("'{name}' is finalized (in calibrated/) and frozen — delete is for drafts only."));
         }
         None => err(&format!("Unknown profile '{name}'. Drafts: {}", drafts.join(", "))),
@@ -423,19 +423,15 @@ fn cmd_uninstall(name: Option<String>) -> Result<()> {
         warn(&format!("No EQ configs are deployed in {}.", conf_d().display()));
         return Ok(());
     }
-    let mut buckets: [(&str, Vec<String>); 4] = [
-        ("Drafts (work in progress)", vec![]),
-        ("Calibrated (promoted / shipped)", vec![]),
-        ("Orphans (installed, but the profile is gone from the repo)", vec![]),
-        ("Other EQ configs on this system (not from this tool)", vec![]),
+    let mut buckets: [(&str, Vec<String>); 2] = [
+        ("Installed by pwtune", vec![]),
+        ("Other EQ configs on this system (not from pwtune)", vec![]),
     ];
     let mut label_path: Vec<(String, PathBuf)> = Vec::new();
     for (label, path, kind) in items {
         let b = match kind {
-            Kind::Draft => 0,
-            Kind::Shipped => 1,
-            Kind::Orphan => 2,
-            Kind::External => 3,
+            Kind::Managed => 0,
+            Kind::External => 1,
         };
         buckets[b].1.push(label.clone());
         label_path.push((label, path));
@@ -484,28 +480,24 @@ fn cmd_promote(name: Option<String>) -> Result<()> {
         warn("Nothing selected.");
         return Ok(());
     }
-    let src = drafts_dir().join(format!("{name}.conf"));
+    let src = draft_path(&name);
     if !src.is_file() {
-        if calibrated_dir().join(format!("{name}.conf")).is_file() {
-            warn(&format!("'{name}' is already finalized (in calibrated/)."));
+        if calibrated_path(&name).is_file() {
+            warn(&format!("'{name}' is already calibrated (frozen)."));
         } else {
             err(&format!("No draft named '{name}'. Drafts: {}", drafts.join(", ")));
         }
         return Ok(());
     }
-    fs::create_dir_all(calibrated_dir())?;
-    let dest = calibrated_dir().join(format!("{name}.conf"));
-    if dest.exists() && !ask(&format!("calibrated/{name}.conf exists — overwrite?"), "n").to_lowercase().starts_with('y') {
+    let dest = calibrated_path(&name);
+    if dest.exists() && !ask(&format!("{name}.calibrated.conf exists — overwrite?"), "n").to_lowercase().starts_with('y') {
         warn("Kept the existing one; draft left in place.");
         return Ok(());
     }
     fs::rename(&src, &dest)?;
-    ok(&format!("Finalized: drafts/{name}.conf → calibrated/{name}.conf"));
-    println!("  It's frozen now (edit/delete won't touch it) and ships with the repo.");
-    next_steps(&[
-        ("Publish it", "git add calibrated/ && commit && push".to_string()),
-        ("Deploy on a machine", "in ReinstallScripts: just eq-import, then just pwtune".to_string()),
-    ]);
+    ok(&format!("Finalized: {name}.conf → {name}.calibrated.conf"));
+    println!("  It's frozen now — edit/delete won't touch it. Commit it wherever you keep it.");
+    next_steps(&[("Commit it", "git add . && git commit".to_string())]);
     Ok(())
 }
 

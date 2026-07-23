@@ -1,6 +1,6 @@
 //! Everything that talks to PipeWire via pactl/paplay/parecord and systemctl.
 use crate::dsp::RATE;
-use crate::profile::{calibrated_dir, conf_d, drafts_dir, DEPLOY_PREFIX};
+use crate::profile::{conf_d, DEPLOY_PREFIX};
 use anyhow::Result;
 use regex::Regex;
 use std::path::PathBuf;
@@ -153,9 +153,12 @@ pub fn play_and_record(sweep: &str, rec_path: &str, speaker: &str, mic: &str) ->
 }
 
 pub enum Kind {
-    Draft,
-    Shipped,
-    Orphan,
+    /// Deployed by pwtune (a pwtune-<name>.conf file).
+    Managed,
+    /// Any other EQ filter-chain config on the system (e.g. a leftover, or one
+    /// deployed by another tool). uninstall is system-wide, so it surfaces these
+    /// too — but it can't tie a deployed file back to a source folder, so there
+    /// are no draft/calibrated tiers here.
     External,
 }
 
@@ -179,14 +182,7 @@ pub fn deployed_eq_configs() -> Vec<(String, PathBuf, Kind)> {
     for f in files {
         let path = dir.join(&f);
         if let Some(name) = f.strip_prefix(DEPLOY_PREFIX).and_then(|s| s.strip_suffix(".conf")) {
-            let kind = if drafts_dir().join(format!("{name}.conf")).is_file() {
-                Kind::Draft
-            } else if calibrated_dir().join(format!("{name}.conf")).is_file() {
-                Kind::Shipped
-            } else {
-                Kind::Orphan
-            };
-            out.push((name.to_string(), path, kind));
+            out.push((name.to_string(), path, Kind::Managed));
         } else if let Ok(txt) = std::fs::read_to_string(&path) {
             if txt.contains("libpipewire-module-filter-chain") && txt.contains("effect_input") {
                 out.push((f.clone(), path, Kind::External));

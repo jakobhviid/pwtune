@@ -1,5 +1,8 @@
-//! Profile storage: drafts/ (scratch) + calibrated/ (finalized), lookup, and the
-//! PipeWire filter-chain config template.
+//! Profiles are plain `.conf` files in the CURRENT directory — pwtune is a
+//! folder-scoped tool (like a linter): it works on whatever folder you run it in.
+//! A profile is "calibrated" (frozen) purely by its filename: `foo.calibrated.conf`.
+//! `promote` just renames `foo.conf` -> `foo.calibrated.conf`; edit/delete refuse
+//! a calibrated file. The display name strips the marker (`foo`), shown with a tag.
 use crate::dsp::Band;
 use crate::ui::slugify;
 use anyhow::{anyhow, Result};
@@ -10,42 +13,60 @@ use std::path::PathBuf;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
     Draft,
-    Shipped,
+    Calibrated,
 }
 
-/// Repo/data root: $PWTUNE_HOME if set (the justfile exports it), else CWD.
-pub fn home() -> PathBuf {
-    std::env::var("PWTUNE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-}
-
-pub fn drafts_dir() -> PathBuf { home().join("drafts") }
-pub fn calibrated_dir() -> PathBuf { home().join("calibrated") }
+pub const DEPLOY_PREFIX: &str = "pwtune-";
 
 pub fn conf_d() -> PathBuf {
     let h = std::env::var("HOME").unwrap_or_default();
     PathBuf::from(h).join(".config/pipewire/pipewire.conf.d")
 }
 
-pub const DEPLOY_PREFIX: &str = "pwtune-";
+fn cwd() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
 
-fn names_in(dir: &PathBuf) -> Vec<String> {
-    let mut v: Vec<String> = fs::read_dir(dir)
+/// filename stem -> (display name, tier). `foo.calibrated` -> ("foo", Calibrated).
+fn classify(stem: &str) -> (String, Tier) {
+    match stem.strip_suffix(".calibrated") {
+        Some(base) => (base.to_string(), Tier::Calibrated),
+        None => (stem.to_string(), Tier::Draft),
+    }
+}
+
+/// Every profile in the current directory: (name, path, tier), sorted by name.
+pub fn scan() -> Vec<(String, PathBuf, Tier)> {
+    let mut out: Vec<(String, PathBuf, Tier)> = fs::read_dir(cwd())
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|e| {
-            let n = e.file_name().to_string_lossy().to_string();
-            n.strip_suffix(".conf").map(|s| s.to_string())
+            let f = e.file_name().to_string_lossy().to_string();
+            f.strip_suffix(".conf").map(|stem| {
+                let (name, tier) = classify(stem);
+                (name, e.path(), tier)
+            })
         })
         .collect();
-    v.sort();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn names_of(tier: Tier) -> Vec<String> {
+    let mut v: Vec<String> =
+        scan().into_iter().filter(|(_, _, t)| *t == tier).map(|(n, _, _)| n).collect();
+    v.dedup();
     v
 }
 
-pub fn draft_names() -> Vec<String> { names_in(&drafts_dir()) }
-pub fn calibrated_names() -> Vec<String> { names_in(&calibrated_dir()) }
+pub fn draft_names() -> Vec<String> {
+    names_of(Tier::Draft)
+}
+
+pub fn calibrated_names() -> Vec<String> {
+    names_of(Tier::Calibrated)
+}
 
 /// All profile names, drafts first (active work), de-duplicated.
 pub fn profile_names() -> Vec<String> {
@@ -58,17 +79,26 @@ pub fn profile_names() -> Vec<String> {
     out
 }
 
-/// (path, tier) for a name, preferring a draft over a shipped one.
+/// (path, tier) for a name, preferring a draft over a calibrated one.
 pub fn find_profile(name: &str) -> Option<(PathBuf, Tier)> {
-    let d = drafts_dir().join(format!("{name}.conf"));
+    let d = draft_path(name);
     if d.is_file() {
         return Some((d, Tier::Draft));
     }
-    let c = calibrated_dir().join(format!("{name}.conf"));
+    let c = calibrated_path(name);
     if c.is_file() {
-        return Some((c, Tier::Shipped));
+        return Some((c, Tier::Calibrated));
     }
     None
+}
+
+/// Where `create` writes, and the source `promote` renames.
+pub fn draft_path(name: &str) -> PathBuf {
+    cwd().join(format!("{name}.conf"))
+}
+
+pub fn calibrated_path(name: &str) -> PathBuf {
+    cwd().join(format!("{name}.calibrated.conf"))
 }
 
 fn field(path: &PathBuf, name: &str) -> Option<String> {
@@ -77,7 +107,9 @@ fn field(path: &PathBuf, name: &str) -> Option<String> {
     re.captures(&txt).map(|c| c[1].to_string())
 }
 
-pub fn target_match(path: &PathBuf) -> Option<String> { field(path, "target-match") }
+pub fn target_match(path: &PathBuf) -> Option<String> {
+    field(path, "target-match")
+}
 
 pub fn description(path: &PathBuf) -> String {
     fs::read_to_string(path)
@@ -98,7 +130,7 @@ pub fn input_node(path: &PathBuf) -> Option<String> {
         .map(|m| m.as_str().to_string())
 }
 
-/// Write a profile config (drafts/<name>.conf). Mirrors the Python template.
+/// Write a profile config. Mirrors the template used by the original tool.
 pub fn write_profile(name: &str, bands: &[Band], boost: f64, target: &str, out: &PathBuf) -> Result<()> {
     let slug = slugify(name);
     let mut nodes: Vec<String> = Vec::new();
@@ -106,7 +138,7 @@ pub fn write_profile(name: &str, bands: &[Band], boost: f64, target: &str, out: 
     let mut prev: Option<String> = None;
 
     let add = |node_name: &str, label: &str, freq: f64, q: f64, gain: f64, comment: &str,
-                   nodes: &mut Vec<String>, links: &mut Vec<String>, prev: &mut Option<String>| {
+               nodes: &mut Vec<String>, links: &mut Vec<String>, prev: &mut Option<String>| {
         nodes.push(format!(
             "                    {{\n\
              \x20                       type  = builtin\n\
@@ -121,7 +153,9 @@ pub fn write_profile(name: &str, bands: &[Band], boost: f64, target: &str, out: 
              \x20                   }}"
         ));
         if let Some(p) = prev {
-            links.push(format!("                    {{ output = \"{p}:Out\" input = \"{node_name}:In\" }}"));
+            links.push(format!(
+                "                    {{ output = \"{p}:Out\" input = \"{node_name}:In\" }}"
+            ));
         }
         *prev = Some(node_name.to_string());
     };
@@ -147,9 +181,9 @@ pub fn write_profile(name: &str, bands: &[Band], boost: f64, target: &str, out: 
          # Makeup gain (preamp): +{boost} dB   |   {} EQ band(s)\n\
          #\n\
          # target-match: {target}\n\
-         #   `pwtune install` resolves this to the actual sink node.name (it\n\
-         #   differs per machine/GPU/bus, but the monitor/device name is stable). If\n\
-         #   you deploy this by hand, replace __TARGET_SINK__ with a name from\n\
+         #   `pwtune install` resolves this to the actual sink node.name (it differs\n\
+         #   per machine/GPU/bus, but the monitor/device name is stable). If you\n\
+         #   deploy this by hand, replace __TARGET_SINK__ with a name from\n\
          #   `pactl list short sinks`.\n\n",
         bands.len()
     );
@@ -185,9 +219,6 @@ pub fn write_profile(name: &str, bands: &[Band], boost: f64, target: &str, out: 
         links.join("\n"),
     );
 
-    if let Some(parent) = out.parent() {
-        fs::create_dir_all(parent)?;
-    }
     fs::write(out, graph).map_err(|e| anyhow!("write {}: {e}", out.display()))?;
     Ok(())
 }
