@@ -24,10 +24,10 @@ the tool acts on that folder.
 
 A profile is "calibrated" (frozen) purely by its **filename**:
 
-- `desk.conf` — a **draft**: editable, deletable, tweak away.
+- `desk.draft.conf` — a **draft**: editable, deletable, tweak away.
 - `desk.calibrated.conf` — **calibrated**: frozen. `edit`/`delete` refuse it.
 
-`promote` is just a rename (`desk.conf` → `desk.calibrated.conf`) — its only job
+`promote` is just a rename (`desk.draft.conf` → `desk.calibrated.conf`) — its only job
 is that lock. You commit the files yourself, wherever you keep them.
 
 ## Install
@@ -55,13 +55,13 @@ pwtune <command> [options]
 | Command | What it does |
 |---------|--------------|
 | `measure` | Play a sweep, record it, print the frequency response. Changes nothing. |
-| `create [name]` | Measure, then write a starting profile `./<name>.conf`. Prompts for name/boost/devices. |
+| `create [name]` | Measure, then write a starting profile `./<name>.draft.conf`. Prompts for name/boost/devices. |
 | `list` | List the profiles in this folder (draft / calibrated) and their install state. |
 | `install [name]` | Resolve the profile's target sink, deploy it, make it the default output. |
 | `edit [name]` | Open a **draft** in `$EDITOR` (calibrated are frozen). |
 | `delete [name]` | Delete a **draft** (calibrated are frozen). |
 | `uninstall [name]` | Remove a deployed EQ — lists everything deployed (pwtune's + any other EQ config on the system). |
-| `promote [name]` | Freeze a draft: rename `./<name>.conf` → `./<name>.calibrated.conf`. |
+| `promote [name]` | Freeze a draft: rename `./<name>.draft.conf` → `./<name>.calibrated.conf`. |
 
 Every verb runs with no arguments too: it enumerates what's available, defaults to
 the sensible choice for this machine, and prompts for the rest. Common options for
@@ -74,7 +74,7 @@ the sensible choice for this machine, and prompts for the rest. Common options f
 cd ~/audio/profiles          # wherever you want the .conf files to live
 
 pwtune measure               # see what the speaker actually does
-pwtune create desk           # measure → ./desk.conf (prompts for boost, devices)
+pwtune create desk           # measure → ./desk.draft.conf (prompts for boost, devices)
 pwtune install desk          # deploy it, listen
 pwtune edit desk             # tweak Gain/Freq/Q, then:
 pwtune install desk          # re-deploy and re-listen

@@ -402,12 +402,12 @@ fn cmd_delete(name: Option<String>) -> Result<()> {
             if conf_d().join(format!("{DEPLOY_PREFIX}{name}.conf")).is_file() {
                 warn(&format!("'{name}' is currently installed — uninstall it first if you don't want it playing."));
             }
-            if !ask(&format!("Delete drafts/{name}.conf?"), "n").to_lowercase().starts_with('y') {
+            if !ask(&format!("Delete {name}.draft.conf?"), "n").to_lowercase().starts_with('y') {
                 warn("Kept.");
                 return Ok(());
             }
             fs::remove_file(&path)?;
-            ok(&format!("Deleted drafts/{name}.conf"));
+            ok(&format!("Deleted {name}.draft.conf"));
         }
         Some((_, Tier::Calibrated)) => {
             err(&format!("'{name}' is finalized (in calibrated/) and frozen — delete is for drafts only."));
@@ -495,7 +495,7 @@ fn cmd_promote(name: Option<String>) -> Result<()> {
         return Ok(());
     }
     fs::rename(&src, &dest)?;
-    ok(&format!("Finalized: {name}.conf → {name}.calibrated.conf"));
+    ok(&format!("Finalized: {name}.draft.conf → {name}.calibrated.conf"));
     println!("  It's frozen now — edit/delete won't touch it. Commit it wherever you keep it.");
     next_steps(&[("Commit it", "git add . && git commit".to_string())]);
     Ok(())

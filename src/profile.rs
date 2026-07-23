@@ -1,8 +1,11 @@
-//! Profiles are plain `.conf` files in the CURRENT directory — pwtune is a
-//! folder-scoped tool (like a linter): it works on whatever folder you run it in.
-//! A profile is "calibrated" (frozen) purely by its filename: `foo.calibrated.conf`.
-//! `promote` just renames `foo.conf` -> `foo.calibrated.conf`; edit/delete refuse
-//! a calibrated file. The display name strips the marker (`foo`), shown with a tag.
+//! Profiles are `.conf` files in the CURRENT directory — pwtune is a folder-scoped
+//! tool (like a linter): it works on whatever folder you run it in. To avoid
+//! touching unrelated PipeWire configs, pwtune only recognizes its own two
+//! suffixes:
+//!   * `foo.draft.conf`      — a draft: editable, deletable
+//!   * `foo.calibrated.conf` — frozen: edit/delete refuse it
+//! `promote` renames `foo.draft.conf` -> `foo.calibrated.conf`. The display name
+//! strips the marker (`foo`) and shows a tier tag. Any other `.conf` is ignored.
 use crate::dsp::Band;
 use crate::ui::slugify;
 use anyhow::{anyhow, Result};
@@ -27,15 +30,9 @@ fn cwd() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-/// filename stem -> (display name, tier). `foo.calibrated` -> ("foo", Calibrated).
-fn classify(stem: &str) -> (String, Tier) {
-    match stem.strip_suffix(".calibrated") {
-        Some(base) => (base.to_string(), Tier::Calibrated),
-        None => (stem.to_string(), Tier::Draft),
-    }
-}
-
-/// Every profile in the current directory: (name, path, tier), sorted by name.
+/// Every pwtune profile in the current directory: (name, path, tier), sorted.
+/// Only `*.draft.conf` and `*.calibrated.conf` are ours — any other `.conf` is
+/// ignored, so pwtune never touches a config it didn't create.
 pub fn scan() -> Vec<(String, PathBuf, Tier)> {
     let mut out: Vec<(String, PathBuf, Tier)> = fs::read_dir(cwd())
         .into_iter()
@@ -43,10 +40,13 @@ pub fn scan() -> Vec<(String, PathBuf, Tier)> {
         .flatten()
         .filter_map(|e| {
             let f = e.file_name().to_string_lossy().to_string();
-            f.strip_suffix(".conf").map(|stem| {
-                let (name, tier) = classify(stem);
-                (name, e.path(), tier)
-            })
+            if let Some(name) = f.strip_suffix(".draft.conf") {
+                Some((name.to_string(), e.path(), Tier::Draft))
+            } else if let Some(name) = f.strip_suffix(".calibrated.conf") {
+                Some((name.to_string(), e.path(), Tier::Calibrated))
+            } else {
+                None
+            }
         })
         .collect();
     out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -94,7 +94,7 @@ pub fn find_profile(name: &str) -> Option<(PathBuf, Tier)> {
 
 /// Where `create` writes, and the source `promote` renames.
 pub fn draft_path(name: &str) -> PathBuf {
-    cwd().join(format!("{name}.conf"))
+    cwd().join(format!("{name}.draft.conf"))
 }
 
 pub fn calibrated_path(name: &str) -> PathBuf {
