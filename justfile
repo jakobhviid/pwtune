@@ -1,33 +1,52 @@
-# Thin shortcuts over speaker-eq.py — the Python CLI is the actual tool; these
-# recipes just save you typing `python3 speaker-eq.py ...`. Everything here works
-# the same run directly, e.g. `python3 speaker-eq.py measure`.
+# Shortcuts over speaker-eq.py — the Python CLI is the actual tool; these recipes
+# just save typing and guide you. Every verb works with no arguments: it lists
+# what's available, defaults to the sensible choice for this machine, and prompts
+# for the rest. You don't need to remember device names or flags.
+#
+# `measure` and `create` need NumPy/SciPy; the first time you run either, a local
+# .venv is created and the libraries installed automatically. The other verbs
+# don't need them and run on the system python3.
 
-py := "python3 " + justfile_directory() + "/speaker-eq.py"
+script := justfile_directory() + "/speaker-eq.py"
+venv    := justfile_directory() + "/.venv"
+vpy     := venv + "/bin/python"
 
-# Show available recipes
+# Show available commands
 default:
     @just --list
 
-# Play a sweep and print the frequency response (no changes). Extra flags pass through, e.g. `just measure --mic <src>`
-measure *args:
-    {{py}} measure {{args}}
+# (internal) create the local Python env with numpy+scipy on first use
+_deps:
+    #!/usr/bin/env bash
+    set -e
+    if [[ ! -x "{{vpy}}" ]]; then
+        echo "First run: setting up a local Python environment (numpy + scipy)…"
+        python3 -m venv "{{venv}}"
+        "{{vpy}}" -m pip install -q --upgrade pip
+        "{{vpy}}" -m pip install -q numpy scipy
+        echo "…done."
+    fi
 
-# Measure + generate a starting profile -> profiles/<name>.conf. e.g. `just create desk-monitor --boost 12`
-create name *args:
-    {{py}} create {{name}} {{args}}
+# Play a sweep and show the frequency response (guides you through speaker+mic; no changes)
+measure *args: _deps
+    "{{vpy}}" "{{script}}" measure {{args}}
 
-# List profiles and show which are installed / active
+# Measure and generate a starting profile (prompts for name, boost, speaker, mic)
+create *args: _deps
+    "{{vpy}}" "{{script}}" create {{args}}
+
+# List profiles and show which are installed / which is the active output
 list:
-    {{py}} list
+    python3 "{{script}}" list
 
-# Install a profile (prompts if no name given)
+# Install a profile as an EQ output (no name → pick from a list, defaults to the connected speaker)
 install name="":
-    {{py}} install {{name}}
+    python3 "{{script}}" install {{name}}
 
-# Remove an installed profile (prompts if no name given)
+# Remove an installed profile (no name → pick from installed ones)
 uninstall name="":
-    {{py}} uninstall {{name}}
+    python3 "{{script}}" uninstall {{name}}
 
-# Copy a finished profile into a sibling ReinstallScripts checkout (../ReinstallScripts)
-promote name:
-    {{py}} promote {{name}}
+# Copy a finished profile into ReinstallScripts (clones it via SSH if missing)
+promote name="":
+    python3 "{{script}}" promote {{name}}

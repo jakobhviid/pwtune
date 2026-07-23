@@ -32,8 +32,9 @@ REPO_DIR = os.path.dirname(os.path.abspath(__file__))
 PROFILES_DIR = os.path.join(REPO_DIR, "profiles")
 CONF_D = os.path.expanduser("~/.config/pipewire/pipewire.conf.d")
 DEPLOY_PREFIX = "eqlab-"           # so lab installs never clash with other tools' files
-SIBLING_RIS_ASSETS = os.path.normpath(
-    os.path.join(REPO_DIR, "..", "ReinstallScripts", "Linux", "assets", "speaker-eq"))
+RIS_ROOT = os.path.normpath(os.path.join(REPO_DIR, "..", "ReinstallScripts"))
+RIS_SSH = "git@github.com:jakobhviid/ReinstallScripts.git"
+SIBLING_RIS_ASSETS = os.path.join(RIS_ROOT, "Linux", "assets", "speaker-eq")
 
 RATE = 48000
 DURATION = 3
@@ -96,48 +97,61 @@ def detect_mic_source(devices):
     return None
 
 
-def prompt_device_choice(kind, devices):
-    print(f"\n  Available {kind}:", file=sys.stderr)
+def ask(prompt, default=""):
+    """Free-text prompt with an optional default (Enter accepts it)."""
+    label = f"{prompt} [{default}]: " if default != "" else f"{prompt}: "
+    try:
+        ans = input(label).strip()
+    except EOFError:
+        ans = ""
+    return ans or default
+
+
+def choose_device(kind, devices, detected):
+    """Numbered picker over devices; the detected one is the Enter-default."""
+    if not devices:
+        err(f"No {kind}s found. Is PipeWire running?"); sys.exit(1)
+    print(f"\nAvailable {kind}s:", file=sys.stderr)
+    default_n = None
     for i, d in enumerate(devices, 1):
-        label = d["nick"] or d["desc"] or d["name"]
-        print(f"    {i}. {label}  ({d['name']})", file=sys.stderr)
+        label = d.get("nick") or d.get("desc") or d["name"]
+        is_def = detected and d["name"] == detected["name"]
+        if is_def:
+            default_n = i
+        print(f"  {i}) {label}{'   ← detected (press Enter)' if is_def else ''}", file=sys.stderr)
+        print(f"       {d['name']}", file=sys.stderr)
     while True:
+        prompt = f"Pick a {kind}" + (f" [{default_n}]: " if default_n else ": ")
         try:
-            idx = int(input(f"\n  Enter number (1-{len(devices)}): ").strip()) - 1
-            if 0 <= idx < len(devices):
-                return devices[idx]
-        except (ValueError, EOFError):
-            pass
-        print("  Invalid choice, try again.", file=sys.stderr)
+            ans = input(prompt).strip()
+        except EOFError:
+            ans = ""
+        if not ans and default_n:
+            return devices[default_n - 1]
+        if ans.isdigit() and 1 <= int(ans) <= len(devices):
+            return devices[int(ans) - 1]
+        print("  Please enter a number from the list.", file=sys.stderr)
 
 
 def resolve_devices(speaker_arg, mic_arg):
-    """Resolve (speaker_sink, mic_source, speaker_nick) from args, auto-detect, or a prompt."""
-    sinks = get_pactl_devices("sinks")
-    sources = [d for d in get_pactl_devices("sources") if "monitor" not in d["name"].lower()]
-
+    """Resolve (speaker_sink, mic_source, speaker_nick). Always guides the user
+    through a numbered picker (defaulting to the auto-detected device) unless a
+    device was given explicitly on the command line."""
     if speaker_arg:
         speaker = {"name": speaker_arg, "desc": speaker_arg, "nick": ""}
     else:
-        speaker = detect_speaker_sink(sinks)
-        if speaker:
-            info(f"Speaker: {speaker['nick'] or speaker['desc']}  ({speaker['name']})")
-        else:
-            if not sinks:
-                err("No audio sinks found. Is PipeWire running?"); sys.exit(1)
-            speaker = prompt_device_choice("speakers", sinks)
+        sinks = [d for d in get_pactl_devices("sinks")
+                 if not d["name"].startswith(("effect_input.", "effect_output."))]
+        speaker = choose_device("speaker", sinks, detect_speaker_sink(sinks))
 
     if mic_arg:
         mic = {"name": mic_arg, "desc": mic_arg, "nick": ""}
     else:
-        mic = detect_mic_source(sources)
-        if mic:
-            info(f"Mic:     {mic['nick'] or mic['desc']}  ({mic['name']})")
-        else:
-            if not sources:
-                err("No audio sources found."); sys.exit(1)
-            mic = prompt_device_choice("microphones", sources)
+        sources = [d for d in get_pactl_devices("sources") if "monitor" not in d["name"].lower()]
+        mic = choose_device("microphone", sources, detect_mic_source(sources))
 
+    info(f"Speaker: {speaker.get('nick') or speaker.get('desc') or speaker['name']}")
+    info(f"Mic:     {mic.get('nick') or mic.get('desc') or mic['name']}")
     return speaker["name"], mic["name"], speaker.get("nick", "")
 
 
@@ -169,9 +183,16 @@ def sink_nick(name):
 # ─────────────────────────── measurement ────────────────────────────────────
 
 def _np():
-    import numpy as np
-    from scipy import signal  # noqa: F401  (imported for side effects / availability)
-    return np
+    try:
+        import numpy as np
+        from scipy import signal  # noqa: F401  (availability check)
+        return np
+    except ImportError:
+        err("NumPy + SciPy are required for measurement but aren't installed.")
+        print("  Install them:   python3 -m pip install numpy scipy")
+        print("  Or use the justfile — `just measure` / `just create` set up a local")
+        print("  environment automatically on first run, so you don't have to.")
+        sys.exit(1)
 
 
 def generate_sweep(filename):
@@ -423,10 +444,18 @@ def cmd_measure(args):
 
 
 def cmd_create(args):
-    name = args.name
     speaker, mic, nick = resolve_devices(args.speaker, args.mic)
+    name = args.name or ask("\nName this profile", slugify(nick) if nick else "my-speaker")
+    if not name:
+        warn("No name given — aborting."); return
+    boost = args.boost
+    if boost is None:
+        try:
+            boost = float(ask("Makeup gain in dB (louder overall; 0 = none)", "0"))
+        except ValueError:
+            boost = 0.0
     target_match = args.target_match or nick or speaker
-    info(f"target-match for '{name}': {target_match}")
+    info(f"Profile '{name}': target-match='{target_match}', makeup +{boost} dB")
     print("\nKeep the room quiet. Measuring to design a starting EQ...\n")
     with tempfile.TemporaryDirectory() as tmp:
         sweep = os.path.join(tmp, "sweep.wav")
@@ -474,7 +503,15 @@ def cmd_install(args):
     profs = list_profiles()
     if not profs:
         err(f"No profiles in {PROFILES_DIR}"); sys.exit(1)
-    name = args.name or pick("Pick a profile to install", profs, default=profs[0])
+    # Machine-aware default: the profile whose target speaker is connected now.
+    default = None
+    for p in profs:
+        m = profile_field(os.path.join(PROFILES_DIR, f"{p}.conf"), "target-match")
+        if m and resolve_sink(m):
+            info(f"Connected speaker detected → default profile '{p}'")
+            default = p
+            break
+    name = args.name or pick("Pick a profile to install", profs, default=default or profs[0])
     if not name:
         warn("Nothing selected."); return
     path = os.path.join(PROFILES_DIR, f"{name}.conf")
@@ -528,18 +565,32 @@ def cmd_uninstall(args):
 
 
 def cmd_promote(args):
-    path = os.path.join(PROFILES_DIR, f"{args.name}.conf")
+    profs = list_profiles()
+    if not profs:
+        err(f"No profiles in {PROFILES_DIR}"); sys.exit(1)
+    name = args.name or pick("Pick a profile to promote", profs, default=profs[0])
+    if not name:
+        warn("Nothing selected."); return
+    path = os.path.join(PROFILES_DIR, f"{name}.conf")
     if not os.path.isfile(path):
-        err(f"Unknown profile '{args.name}'."); sys.exit(1)
-    if not os.path.isdir(SIBLING_RIS_ASSETS):
-        err(f"ReinstallScripts assets not found at {SIBLING_RIS_ASSETS}")
-        print("  Expected a sibling checkout: ../ReinstallScripts")
-        sys.exit(1)
-    dest = os.path.join(SIBLING_RIS_ASSETS, f"{args.name}.conf")
+        err(f"Unknown profile '{name}'. Available: {', '.join(profs)}"); sys.exit(1)
+
+    # Need a ReinstallScripts checkout beside this repo; offer to clone it if absent.
+    if not os.path.isdir(RIS_ROOT):
+        warn(f"ReinstallScripts isn't checked out at {RIS_ROOT}")
+        if ask(f"Clone it now via SSH ({RIS_SSH})?", "y").lower().startswith("y"):
+            info("Cloning ReinstallScripts...")
+            if subprocess.run(["git", "clone", RIS_SSH, RIS_ROOT]).returncode != 0:
+                err("Clone failed (SSH key / access?). Aborting."); sys.exit(1)
+        else:
+            warn("Skipped — promote needs a ReinstallScripts checkout."); return
+
+    os.makedirs(SIBLING_RIS_ASSETS, exist_ok=True)
+    dest = os.path.join(SIBLING_RIS_ASSETS, f"{name}.conf")
     with open(path) as s, open(dest, "w") as d:
         d.write(s.read())
     ok(f"Promoted → {dest}")
-    print("  Commit it in ReinstallScripts and install there with `just speaker-eq`.")
+    print("  Now commit it in ReinstallScripts and deploy there with `just speaker-eq`.")
 
 
 def main():
@@ -555,8 +606,8 @@ def main():
     add_measure_opts(m); m.set_defaults(func=cmd_measure)
 
     c = sub.add_parser("create", help="measure + generate a starting profile")
-    c.add_argument("name")
-    c.add_argument("--boost", type=float, default=0.0, help="makeup gain in dB (default 0 = none)")
+    c.add_argument("name", nargs="?", help="profile name (prompted if omitted)")
+    c.add_argument("--boost", type=float, default=None, help="makeup gain in dB (prompted if omitted; 0 = none)")
     c.add_argument("--target-match", help="sink match string (default: the speaker's EDID/nick name)")
     add_measure_opts(c); c.set_defaults(func=cmd_create)
 
@@ -573,7 +624,7 @@ def main():
     un.set_defaults(func=cmd_uninstall)
 
     pr = sub.add_parser("promote", help="copy a profile into a sibling ReinstallScripts checkout")
-    pr.add_argument("name")
+    pr.add_argument("name", nargs="?", help="profile name (prompted if omitted)")
     pr.set_defaults(func=cmd_promote)
 
     args = p.parse_args()
