@@ -383,6 +383,13 @@ def profile_input_node(path):
     return m.group(0) if m else None
 
 
+def profile_description(path):
+    """The human-facing name (node.description) shown in sound settings."""
+    with open(path) as f:
+        m = re.search(r'node\.description\s*=\s*"([^"]+)"', f.read())
+    return m.group(1) if m else "(no description)"
+
+
 # ─────────────────────────── deploy / manage ────────────────────────────────
 
 def restart_pipewire():
@@ -481,22 +488,27 @@ def cmd_create(args):
 
 
 def cmd_list(_args):
-    profs, inst = list_profiles(), installed_profiles()
+    profs = list_profiles()
+    inst = installed_profiles()
     default = subprocess.run(["pactl", "get-default-sink"], capture_output=True, text=True).stdout.strip()
     if not profs:
         warn(f"No profiles in {PROFILES_DIR}"); return
-    print(f"\nProfiles in {PROFILES_DIR}:\n")
+    print(f"\nProfiles ({PROFILES_DIR}):\n")
     for p in profs:
-        node = profile_input_node(os.path.join(PROFILES_DIR, f"{p}.conf")) or ""
-        flags = []
+        path = os.path.join(PROFILES_DIR, f"{p}.conf")
+        desc = profile_description(path)
+        tm = profile_field(path, "target-match") or ""
+        connected = bool(resolve_sink(tm)) if tm else False
+        node = profile_input_node(path)
+        tags = []
         if p in inst:
-            flags.append("installed")
+            tags.append("installed")
         if node and node == default:
-            flags.append("ACTIVE default")
-        tm = profile_field(os.path.join(PROFILES_DIR, f"{p}.conf"), "target-match") or "?"
-        state = f"  [{', '.join(flags)}]" if flags else ""
-        print(f"  • {p:<22} → {tm}{state}")
-    print()
+            tags.append("active output")
+        dot = "●" if connected else "○"
+        extra = f"   [{' · '.join(tags)}]" if tags else ""
+        print(f"  {dot} {p:<22}{desc}{extra}")
+    print("\n  ● speaker connected now    ○ not connected\n")
 
 
 def cmd_install(args):
@@ -628,7 +640,11 @@ def main():
     pr.set_defaults(func=cmd_promote)
 
     args = p.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        print("\nCancelled.", file=sys.stderr)
+        sys.exit(0)
 
 
 if __name__ == "__main__":

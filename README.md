@@ -130,8 +130,10 @@ EQ before reaching the real speaker.
 
 This grew out of
 [thinkpad-x1-carbon-pipewire-eq](https://github.com/jakobhviid/thinkpad-x1-carbon-pipewire-eq),
-which fixed one laptop's speakers. It's now a general tool for any speaker; the
-bundled `profiles/thinkpad-x1carbon.conf` remains as an example.
+which fixed one laptop's speakers. It's now a general tool for any speaker. Two
+profiles ship as examples: `profiles/thinkpad-x1carbon.conf` (that laptop's
+internal speakers) and `profiles/dell-u4025qw.conf` (a monitor's built-in
+speakers over HDMI/DisplayPort).
 
 ## License
 
