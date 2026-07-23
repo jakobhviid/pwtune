@@ -46,10 +46,18 @@ list:
 install name="":
     python3 "{{script}}" install {{name}}
 
+# Edit a draft profile in $EDITOR (no name → pick). Calibrated profiles are frozen.
+edit name="":
+    python3 "{{script}}" edit {{name}}
+
+# Delete a draft profile (no name → pick, asks to confirm). Calibrated profiles are frozen.
+delete name="":
+    python3 "{{script}}" delete {{name}}
+
 # Remove an installed profile (no name → pick from installed ones)
 uninstall name="":
     python3 "{{script}}" uninstall {{name}}
 
-# Copy a finished profile into ReinstallScripts (clones it via SSH if missing)
+# Finalize a draft: move it into calibrated/ (shipped, frozen). No name → pick.
 promote name="":
     python3 "{{script}}" promote {{name}}

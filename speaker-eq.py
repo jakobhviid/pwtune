@@ -6,13 +6,19 @@ filter-chain EQ profile, and install/remove profiles.
 This is the tool. The justfile is only a thin set of shortcuts over these
 subcommands, so everything works with plain `python3 speaker-eq.py <cmd>` too.
 
+Profiles live in two folders: drafts/ (scratch, where `create` writes) and
+calibrated/ (finalized, shipped). `promote` moves a draft into calibrated/;
+calibrated profiles are final — `edit` and `delete` refuse to touch them.
+
 Subcommands:
   measure               Play a sweep, record it, print the frequency response. No changes.
-  create   <name>       measure + auto-generate a *starting* EQ profile -> profiles/<name>.conf
-  list                  List profiles and show which are installed / which is the default output
+  create   [name]       measure + auto-generate a *starting* EQ profile -> drafts/<name>.conf
+  list                  List profiles (draft + shipped) and their install state
   install  [name]       Resolve the profile's target sink, deploy it, make it the default output
+  edit     [name]       Open a draft profile in $EDITOR (calibrated ones are final)
+  delete   [name]       Delete a draft profile (calibrated ones are final)
   uninstall [name]      Remove an installed profile
-  promote  <name>       Copy profiles/<name>.conf into a sibling ReinstallScripts checkout
+  promote  [name]       Finalize a draft: move drafts/<name>.conf -> calibrated/<name>.conf
 
 Measurement honesty: auto-generated EQ is a STARTING POINT, not a finished tuning.
 Cheap mics (webcams, headset mics) have a noise floor, comb filtering off nearby
@@ -23,18 +29,17 @@ iterate measure -> edit profiles/<name>.conf -> re-measure.
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 
 REPO_DIR = os.path.dirname(os.path.abspath(__file__))
-PROFILES_DIR = os.path.join(REPO_DIR, "profiles")
+DRAFTS_DIR = os.path.join(REPO_DIR, "drafts")          # scratch; `create` writes here (gitignored)
+CALIBRATED_DIR = os.path.join(REPO_DIR, "calibrated")  # finalized, shipped profiles (committed)
 CONF_D = os.path.expanduser("~/.config/pipewire/pipewire.conf.d")
 DEPLOY_PREFIX = "eqlab-"           # so lab installs never clash with other tools' files
-RIS_ROOT = os.path.normpath(os.path.join(REPO_DIR, "..", "ReinstallScripts"))
-RIS_SSH = "git@github.com:jakobhviid/ReinstallScripts.git"
-SIBLING_RIS_ASSETS = os.path.join(RIS_ROOT, "Linux", "assets", "speaker-eq")
 
 RATE = 48000
 DURATION = 3
@@ -410,9 +415,30 @@ def restart_pipewire():
     time.sleep(1.5)
 
 
-def list_profiles():
-    return sorted(f[:-5] for f in os.listdir(PROFILES_DIR) if f.endswith(".conf")) \
-        if os.path.isdir(PROFILES_DIR) else []
+def _names_in(d):
+    return sorted(f[:-5] for f in os.listdir(d) if f.endswith(".conf")) if os.path.isdir(d) else []
+
+
+def draft_names():
+    return _names_in(DRAFTS_DIR)
+
+
+def profile_names():
+    """All profile names, drafts first (active work), de-duplicated."""
+    seen, out = set(), []
+    for n in draft_names() + _names_in(CALIBRATED_DIR):
+        if n not in seen:
+            seen.add(n); out.append(n)
+    return out
+
+
+def find_profile(name):
+    """(path, tier) for a profile name, preferring a draft over a shipped one; else (None, None)."""
+    for tier, d in (("draft", DRAFTS_DIR), ("shipped", CALIBRATED_DIR)):
+        path = os.path.join(d, f"{name}.conf")
+        if os.path.isfile(path):
+            return path, tier
+    return None, None
 
 
 def installed_profiles():
@@ -498,41 +524,40 @@ def cmd_create(args):
         avg = np.mean(measurements, axis=0)
         print_response(freqs, avg, "measured (average)")
         bands = design_eq(freqs, avg)
-    out = os.path.join(PROFILES_DIR, f"{name}.conf")
+    out = os.path.join(DRAFTS_DIR, f"{name}.conf")
     write_profile(name, bands, boost, target_match, out)
-    ok(f"Wrote {out}  ({len(bands)} bands, +{boost} dB makeup)")
+    ok(f"Wrote draft {out}  ({len(bands)} bands, +{boost} dB makeup)")
     print("  A starting point: the low/low-mid correction is measured; the top end")
     print("  is a guess (the mic barely hears it) — refine it by ear.")
-    rel = os.path.join("profiles", f"{name}.conf")
     next_steps(
         ("Hear it", run_cmd("install", name)),
-        ("Tweak it", f"edit {rel} (Gain/Freq/Q are plain text), then re-run {run_cmd('install', name)}"),
-        ("Save it for other machines", run_cmd("promote", name)),
+        ("Tweak it", f"{run_cmd('edit', name)}, then re-run {run_cmd('install', name)}"),
+        ("Finalize it (ship it)", run_cmd("promote", name)),
     )
 
 
 def cmd_list(_args):
-    profs = list_profiles()
+    names = profile_names()
     inst = installed_profiles()
     default = subprocess.run(["pactl", "get-default-sink"], capture_output=True, text=True).stdout.strip()
-    if not profs:
-        warn(f"No profiles in {PROFILES_DIR}"); return
-    print(f"\nProfiles ({PROFILES_DIR}):\n")
-    for p in profs:
-        path = os.path.join(PROFILES_DIR, f"{p}.conf")
+    if not names:
+        warn("No profiles yet — make one with `create`."); return
+    print()
+    for p in names:
+        path, tier = find_profile(p)
         desc = profile_description(path)
         tm = profile_field(path, "target-match") or ""
         connected = bool(resolve_sink(tm)) if tm else False
         node = profile_input_node(path)
-        tags = []
+        tags = ["shipped" if tier == "shipped" else "draft"]
         if p in inst:
             tags.append("installed")
         if node and node == default:
             tags.append("active output")
         dot = "●" if connected else "○"
-        extra = f"   [{' · '.join(tags)}]" if tags else ""
-        print(f"  {dot} {p:<22}{desc}{extra}")
+        print(f"  {dot} {p:<22}{desc:<30}[{' · '.join(tags)}]")
     print("\n  ● speaker connected now    ○ not connected")
+    print("  draft = editable work in progress   ·   shipped = finalized (frozen)")
     next_steps(
         ("Install one", run_cmd("install") + "  (pick from the list)"),
         ("Create a new one", run_cmd("create")),
@@ -540,13 +565,14 @@ def cmd_list(_args):
 
 
 def cmd_install(args):
-    profs = list_profiles()
+    profs = profile_names()
     if not profs:
-        err(f"No profiles in {PROFILES_DIR}"); sys.exit(1)
+        err("No profiles yet — make one with `create`."); sys.exit(1)
     # Machine-aware default: the profile whose target speaker is connected now.
     default = None
     for p in profs:
-        m = profile_field(os.path.join(PROFILES_DIR, f"{p}.conf"), "target-match")
+        path, _ = find_profile(p)
+        m = profile_field(path, "target-match")
         if m and resolve_sink(m):
             info(f"Connected speaker detected → default profile '{p}'")
             default = p
@@ -554,8 +580,8 @@ def cmd_install(args):
     name = args.name or pick("Pick a profile to install", profs, default=default or profs[0])
     if not name:
         warn("Nothing selected."); return
-    path = os.path.join(PROFILES_DIR, f"{name}.conf")
-    if not os.path.isfile(path):
+    path, tier = find_profile(name)
+    if not path:
         err(f"Unknown profile '{name}'. Available: {', '.join(profs)}"); sys.exit(1)
 
     match = profile_field(path, "target-match")
@@ -587,12 +613,13 @@ def cmd_install(args):
     else:
         warn("Loaded, but couldn't set default — pick it in your sound settings.")
     print(f"\n  '{name}' is now your output — play something to hear it.")
-    rel = os.path.join("profiles", f"{name}.conf")
-    next_steps(
-        ("Re-tune", f"edit {rel}, then re-run {run_cmd('install', name)}"),
-        ("Turn it off", run_cmd("uninstall", name)),
-        ("Save it for other machines", run_cmd("promote", name)),
-    )
+    steps = []
+    if tier == "draft":
+        steps.append(("Re-tune", f"{run_cmd('edit', name)}, then re-run {run_cmd('install', name)}"))
+    steps.append(("Turn it off", run_cmd("uninstall", name)))
+    if tier == "draft":
+        steps.append(("Finalize it (ship it)", run_cmd("promote", name)))
+    next_steps(*steps)
 
 
 def cmd_uninstall(args):
@@ -616,34 +643,70 @@ def cmd_uninstall(args):
     )
 
 
-def cmd_promote(args):
-    profs = list_profiles()
-    if not profs:
-        err(f"No profiles in {PROFILES_DIR}"); sys.exit(1)
-    name = args.name or pick("Pick a profile to promote", profs, default=profs[0])
+def cmd_edit(args):
+    drafts = draft_names()
+    if not drafts:
+        err("No draft profiles to edit — make one with `create`."); return
+    name = args.name or pick("Pick a draft to edit", drafts, default=drafts[0])
     if not name:
         warn("Nothing selected."); return
-    path = os.path.join(PROFILES_DIR, f"{name}.conf")
-    if not os.path.isfile(path):
-        err(f"Unknown profile '{name}'. Available: {', '.join(profs)}"); sys.exit(1)
+    path, tier = find_profile(name)
+    if not path:
+        err(f"Unknown profile '{name}'. Drafts: {', '.join(drafts)}"); return
+    if tier == "shipped":
+        err(f"'{name}' is finalized (in calibrated/) and frozen — edit is for drafts only.")
+        print("  To change it, create a new draft (re-measure) and promote again.")
+        return
+    editor = os.environ.get("EDITOR") or shutil.which("nano") or shutil.which("vi") or "vi"
+    info(f"Opening {path} in {editor} …")
+    subprocess.run([editor, path])
+    next_steps(("Try your changes", run_cmd("install", name)))
 
-    # Need a ReinstallScripts checkout beside this repo; offer to clone it if absent.
-    if not os.path.isdir(RIS_ROOT):
-        warn(f"ReinstallScripts isn't checked out at {RIS_ROOT}")
-        if ask(f"Clone it now via SSH ({RIS_SSH})?", "y").lower().startswith("y"):
-            info("Cloning ReinstallScripts...")
-            if subprocess.run(["git", "clone", RIS_SSH, RIS_ROOT]).returncode != 0:
-                err("Clone failed (SSH key / access?). Aborting."); sys.exit(1)
-        else:
-            warn("Skipped — promote needs a ReinstallScripts checkout."); return
 
-    os.makedirs(SIBLING_RIS_ASSETS, exist_ok=True)
-    dest = os.path.join(SIBLING_RIS_ASSETS, f"{name}.conf")
-    with open(path) as s, open(dest, "w") as d:
-        d.write(s.read())
-    ok(f"Promoted → {dest}")
+def cmd_delete(args):
+    drafts = draft_names()
+    if not drafts:
+        err("No draft profiles to delete."); return
+    name = args.name or pick("Pick a draft to delete", drafts, default=drafts[0])
+    if not name:
+        warn("Nothing selected."); return
+    path, tier = find_profile(name)
+    if not path:
+        err(f"Unknown profile '{name}'. Drafts: {', '.join(drafts)}"); return
+    if tier == "shipped":
+        err(f"'{name}' is finalized (in calibrated/) and frozen — delete is for drafts only.")
+        return
+    if name in installed_profiles():
+        warn(f"'{name}' is currently installed — uninstall it first if you don't want it playing.")
+    if not ask(f"Delete drafts/{name}.conf?", "n").lower().startswith("y"):
+        warn("Kept."); return
+    os.remove(path)
+    ok(f"Deleted drafts/{name}.conf")
+
+
+def cmd_promote(args):
+    drafts = draft_names()
+    if not drafts:
+        err("No drafts to finalize — make one with `create`."); return
+    name = args.name or pick("Pick a draft to finalize", drafts, default=drafts[0])
+    if not name:
+        warn("Nothing selected."); return
+    src = os.path.join(DRAFTS_DIR, f"{name}.conf")
+    if not os.path.isfile(src):
+        _, tier = find_profile(name)
+        if tier == "shipped":
+            warn(f"'{name}' is already finalized (in calibrated/)."); return
+        err(f"No draft named '{name}'. Drafts: {', '.join(drafts)}"); return
+    os.makedirs(CALIBRATED_DIR, exist_ok=True)
+    dest = os.path.join(CALIBRATED_DIR, f"{name}.conf")
+    if os.path.exists(dest) and not ask(f"calibrated/{name}.conf exists — overwrite?", "n").lower().startswith("y"):
+        warn("Kept the existing one; draft left in place."); return
+    os.replace(src, dest)   # move: a finalized profile lives in exactly one place
+    ok(f"Finalized: drafts/{name}.conf → calibrated/{name}.conf")
+    print("  It's frozen now (edit/delete won't touch it) and ships with the repo.")
     next_steps(
-        ("Deploy it", "in ReinstallScripts: commit the file, then run  just speaker-eq"),
+        ("Publish it", "git add calibrated/ && commit && push"),
+        ("Deploy on a machine", "in ReinstallScripts: just eq-import, then just speaker-eq"),
     )
 
 
@@ -673,11 +736,19 @@ def main():
     ins.add_argument("--speaker", help="override the target sink match")
     ins.set_defaults(func=cmd_install)
 
+    ed = sub.add_parser("edit", help="open a draft profile in $EDITOR (calibrated ones are frozen)")
+    ed.add_argument("name", nargs="?")
+    ed.set_defaults(func=cmd_edit)
+
+    dl = sub.add_parser("delete", help="delete a draft profile (calibrated ones are frozen)")
+    dl.add_argument("name", nargs="?")
+    dl.set_defaults(func=cmd_delete)
+
     un = sub.add_parser("uninstall", help="remove an installed profile")
     un.add_argument("name", nargs="?")
     un.set_defaults(func=cmd_uninstall)
 
-    pr = sub.add_parser("promote", help="copy a profile into a sibling ReinstallScripts checkout")
+    pr = sub.add_parser("promote", help="finalize a draft: move it into calibrated/ (shipped, frozen)")
     pr.add_argument("name", nargs="?", help="profile name (prompted if omitted)")
     pr.set_defaults(func=cmd_promote)
 

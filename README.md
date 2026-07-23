@@ -52,14 +52,21 @@ The tool is the Python CLI — it's self-contained (no `just` required):
 python3 speaker-eq.py <command> [options]
 ```
 
+Profiles live in two folders: **`drafts/`** (scratch, where `create` writes —
+gitignored) and **`calibrated/`** (finalized, shipped with the repo). `promote`
+moves a draft into `calibrated/`; calibrated profiles are **final** — `edit` and
+`delete` refuse to touch them.
+
 | Command | What it does |
 |---------|--------------|
 | `measure` | Play a sweep, record it, print the frequency response. Changes nothing. |
-| `create <name>` | Measure, then auto-generate a starting profile → `profiles/<name>.conf`. |
-| `list` | List profiles and show which are installed / which is the active default output. |
+| `create [name]` | Measure, then auto-generate a starting profile → `drafts/<name>.conf`. Prompts for name/boost if omitted. |
+| `list` | List profiles (draft + shipped) and show which are installed / the active output. |
 | `install [name]` | Resolve the profile's target sink, deploy it, make it the default output. Prompts if no name. |
+| `edit [name]` | Open a **draft** profile in `$EDITOR`. Prompts if no name. |
+| `delete [name]` | Delete a **draft** profile (asks to confirm). Prompts if no name. |
 | `uninstall [name]` | Remove an installed profile. Prompts if no name. |
-| `promote <name>` | Copy a finished profile into a sibling `ReinstallScripts` checkout (personal helper). |
+| `promote [name]` | Finalize a draft: **move** it into `calibrated/` (shipped, frozen). Prompts if no name. |
 
 Common options for `measure`/`create`: `--speaker <sink>`, `--mic <source>`
 (both auto-detect or prompt if omitted), `--iterations N`. `create` also takes
@@ -75,35 +82,60 @@ wrapper only:
 
 ```bash
 just measure                     # → python3 speaker-eq.py measure
-just create desk-monitor --boost 12
+just create                      # guided: pick speaker/mic, name it, set boost
 just list
-just install desk-monitor
-just uninstall desk-monitor
+just install                     # defaults to the connected speaker
+just edit desk-monitor           # tweak a draft
+just promote desk-monitor        # finalize it into calibrated/
 ```
+
+Every verb runs with no arguments too — it enumerates what's available, defaults
+to the sensible choice for this machine, and prompts for the rest.
 
 ## A typical session
 
 ```bash
 # 1. See what your speaker actually does
-python3 speaker-eq.py measure --iterations 5
+just measure
 
-# 2. Generate a starting profile (name it, add makeup gain if the speaker is quiet)
-python3 speaker-eq.py create desk-monitor --boost 12
+# 2. Generate a draft profile (it prompts for a name, boost, speaker, mic)
+just create
 
 # 3. Install it and listen
-python3 speaker-eq.py install desk-monitor
+just install desk-monitor
 
-# 4. Not right? Edit profiles/desk-monitor.conf (Gain/Freq/Q values are plain text),
-#    re-install, and re-measure to check.
-python3 speaker-eq.py install desk-monitor
-python3 speaker-eq.py measure          # compare against the original
+# 4. Not right? Tweak the draft (Gain/Freq/Q are plain text), re-install, re-check
+just edit desk-monitor
+just install desk-monitor
+
+# 5. Happy with it? Finalize it — moves drafts/ → calibrated/ (shipped, frozen)
+just promote desk-monitor
+git add calibrated/ && git commit -m "add desk-monitor profile" && git push
 ```
+
+## Drafts vs. calibrated
+
+- **`drafts/`** — where `create` writes and you iterate. Gitignored: your
+  experiments stay local and don't ship. `edit`/`delete` work here.
+- **`calibrated/`** — the finalized profiles the repo ships. `promote` moves a
+  draft here; once finalized it's **frozen** (`edit`/`delete` refuse it). To
+  change a shipped profile, make a fresh draft and promote again.
+
+## Using these profiles elsewhere (e.g. ReinstallScripts)
+
+This repo depends on nothing and knows nothing about its consumers. If you
+provision machines with a dotfiles/setup repo, have **that** repo pull the
+`calibrated/*.conf` from here (cloning this repo if needed) — the dependency
+belongs on the consumer's side. (In the author's
+[ReinstallScripts](https://github.com/jakobhviid/ReinstallScripts), `just
+eq-import` does exactly this.)
 
 ## How profiles work
 
-Each profile is a PipeWire `filter-chain` config in `profiles/<name>.conf`. It
-creates a **virtual sink** you select as your output; audio routes through the
-EQ before reaching the real speaker.
+Each profile is a PipeWire `filter-chain` config (`drafts/<name>.conf` while
+you're working on it, `calibrated/<name>.conf` once finalized). It creates a
+**virtual sink** you select as your output; audio routes through the EQ before
+reaching the real speaker.
 
 - **Portable targets.** Instead of hardcoding a sink, each profile carries a
   `# target-match:` line — a string matched against the sinks present at install
@@ -131,8 +163,8 @@ EQ before reaching the real speaker.
 This grew out of
 [thinkpad-x1-carbon-pipewire-eq](https://github.com/jakobhviid/thinkpad-x1-carbon-pipewire-eq),
 which fixed one laptop's speakers. It's now a general tool for any speaker. Two
-profiles ship as examples: `profiles/thinkpad-x1carbon.conf` (that laptop's
-internal speakers) and `profiles/dell-u4025qw.conf` (a monitor's built-in
+profiles ship in `calibrated/` as examples: `thinkpad-x1carbon.conf` (that
+laptop's internal speakers) and `dell-u4025qw.conf` (a monitor's built-in
 speakers over HDMI/DisplayPort).
 
 ## License
