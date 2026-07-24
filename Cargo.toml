@@ -16,6 +16,7 @@ hound = "3"
 rustfft = "6"
 regex = "1"
 ctrlc = "3"
+libc = "0.2"
 anyhow = "1"
 
 [profile.release]

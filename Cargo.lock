@@ -306,6 +306,7 @@ dependencies = [
  "clap_mangen",
  "ctrlc",
  "hound",
+ "libc",
  "regex",
  "rustfft",
 ]
