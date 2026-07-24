@@ -36,8 +36,18 @@ is that lock. You commit the files yourself, wherever you keep them.
 
 ## Install
 
+**Homebrew** (Linux, x86_64 / arm64) — pours a prebuilt bottle on x86_64, so no
+compiler/build tools are needed:
+
 ```sh
-brew install jakobhviid/tap/pwtune      # Linux (x86_64 / arm64)
+brew install jakobhviid/tap/pwtune
+```
+
+**Or paste one line** — no Homebrew, no compiler, no root (installs to
+`~/.local/bin`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jakobhviid/pwtune/main/install.sh | sh
 ```
 
 Or build from source (needs Rust):
