@@ -4,6 +4,13 @@ class Pwtune < Formula
   version "@VERSION@"
   license "MIT"
 
+  # Prebuilt x86_64 Linux bottle so `brew install` pours it (no C compiler);
+  # aarch64 falls back to the url+install path below.
+  bottle do
+    root_url "https://github.com/jakobhviid/pwtune/releases/download/v@VERSION@"
+    sha256 cellar: :any_skip_relocation, x86_64_linux: "@BOTTLE_SHA@"
+  end
+
   on_linux do
     on_intel do
       url "https://github.com/jakobhviid/pwtune/releases/download/v@VERSION@/pwtune-x86_64-unknown-linux-musl.tar.gz"
