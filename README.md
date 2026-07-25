@@ -134,6 +134,11 @@ Grew out of
 which fixed one laptop's speakers — now a general, folder-scoped tool for any
 speaker, as a single self-contained Rust binary (no Python/NumPy/SciPy runtime).
 
+## AI disclosure
+
+Parts of this codebase were written with the assistance of AI coding agents
+(Claude Code, opencode, and others). All changes were reviewed by the maintainer.
+
 ## License
 
 MIT
