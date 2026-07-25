@@ -20,8 +20,14 @@ use system::{
 };
 use ui::{ask, err, info, next_steps, ok, pick, pick_sections, run_cmd, slugify, warn};
 
+const REPO_URL: &str = "https://github.com/jakobhviid/pwtune";
+const AFTER_HELP: &str = concat!(
+    "Repository: https://github.com/jakobhviid/pwtune (inspect the source there if needed)\n",
+    "LLM guide: run `pwtune llm` for a full machine-readable reference (every command + usage)."
+);
+
 #[derive(Parser)]
-#[command(name = "pwtune", version, about = "Measure, build, and install PipeWire speaker EQ profiles.", arg_required_else_help = true)]
+#[command(name = "pwtune", version, about = "Measure, build, and install PipeWire speaker EQ profiles.", after_help = AFTER_HELP, after_long_help = AFTER_HELP, arg_required_else_help = true)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -68,6 +74,10 @@ enum Cmd {
     Uninstall { name: Option<String> },
     /// Finalize a draft: rename it to <name>.calibrated.conf (frozen).
     Promote { name: Option<String> },
+    /// Print a full LLM-readable guide to stdout: every command + usage + a link to
+    /// the source repo. Same content as the man page, laid out plainly for an
+    /// LLM/agent to read and drive the tool from zero.
+    Llm,
     /// (dev) Analyze a sweep+recording pair and print the response; for validation.
     #[command(hide = true)]
     DevAnalyze { sweep: String, rec: String },
@@ -563,5 +573,37 @@ fn main() -> Result<()> {
             clap_mangen::Man::new(Cli::command()).render(&mut std::io::stdout())?;
             Ok(())
         }
+        Cmd::Llm => {
+            print!("{}", llm_guide());
+            Ok(())
+        }
     }
+}
+
+/// A single self-contained, plain-text guide an LLM/agent can read to drive pwtune
+/// from zero: the full command reference (rendered from clap) followed by the
+/// README, plus the repo link for source inspection.
+fn llm_guide() -> String {
+    let mut cmd = Cli::command();
+    let mut out = String::new();
+    out.push_str(&format!("pwtune {} — LLM guide\n", env!("CARGO_PKG_VERSION")));
+    out.push_str(&format!("Repository: {REPO_URL}  (read the source there if you need behavior details)\n"));
+    out.push_str("This is the same reference as `man pwtune`, laid out plainly for LLM reading.\n\n");
+
+    out.push_str("================================ COMMAND REFERENCE ================================\n\n");
+    out.push_str(&cmd.render_long_help().to_string());
+    for sub in cmd.get_subcommands_mut() {
+        if sub.is_hide_set() {
+            continue;
+        }
+        out.push_str(&format!("\n\n-------------------------------- pwtune {} --------------------------------\n\n", sub.get_name()));
+        out.push_str(&sub.render_long_help().to_string());
+    }
+
+    out.push_str("\n\n================================ GUIDE (README) ================================\n\n");
+    out.push_str(include_str!("../README.md"));
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out
 }
