@@ -7,7 +7,15 @@ fn no_color() -> bool { std::env::var_os("NO_COLOR").is_some() }
 fn c_out() -> bool { !no_color() && io::stdout().is_terminal() }
 fn c_err() -> bool { !no_color() && io::stderr().is_terminal() }
 
-pub fn info(m: &str) { if c_out() { println!("\x1b[1;34m▸ {m}\x1b[0m") } else { println!("▸ {m}") } }
+// Verbosity: 0 = quiet (essential result + errors only, no chatter/hints), 1 =
+// normal, 2 = verbose. Shared flag names with amdl/grove for consistency.
+use std::sync::atomic::{AtomicU8, Ordering};
+static VERBOSITY: AtomicU8 = AtomicU8::new(1);
+pub fn set_verbosity(level: u8) { VERBOSITY.store(level, Ordering::Relaxed); }
+fn verbosity() -> u8 { VERBOSITY.load(Ordering::Relaxed) }
+pub fn is_quiet() -> bool { verbosity() == 0 }
+
+pub fn info(m: &str) { if verbosity() >= 1 { if c_out() { println!("\x1b[1;34m▸ {m}\x1b[0m") } else { println!("▸ {m}") } } }
 pub fn ok(m: &str) { if c_out() { println!("\x1b[1;32m✓ {m}\x1b[0m") } else { println!("✓ {m}") } }
 pub fn warn(m: &str) { if c_out() { println!("\x1b[1;33m⚠ {m}\x1b[0m") } else { println!("⚠ {m}") } }
 pub fn err(m: &str) { if c_err() { eprintln!("\x1b[1;31m✗ {m}\x1b[0m") } else { eprintln!("✗ {m}") } }
@@ -97,7 +105,9 @@ pub fn run_cmd(verb: &str, arg: &str) -> String {
 }
 
 /// Print a short "what to do next" block. Items are (description, command).
+/// Suppressed under `--quiet` (it's guidance, not the essential result).
 pub fn next_steps(items: &[(&str, String)]) {
+    if is_quiet() { return; }
     println!("{}", if c_out() { "\n\x1b[1;34m  Next:\x1b[0m" } else { "\n  Next:" });
     for (desc, cmd) in items {
         if cmd.is_empty() {

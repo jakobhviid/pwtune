@@ -32,6 +32,12 @@ struct Cli {
     /// Print the full LLM-readable guide (every command + usage + repo link) and exit.
     #[arg(long, global = true)]
     llm: bool,
+    /// Quiet: essential result + errors only (suppress info chatter and Next hints).
+    #[arg(short, long, global = true, conflicts_with = "verbose")]
+    quiet: bool,
+    /// Verbose: show extra detail where available.
+    #[arg(short, long, global = true)]
+    verbose: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -558,6 +564,7 @@ fn main() -> Result<()> {
         std::process::exit(0);
     });
     let cli = Cli::parse();
+    ui::set_verbosity(if cli.quiet { 0 } else if cli.verbose { 2 } else { 1 });
     match cli.cmd {
         Cmd::Measure { speaker, mic, iterations } => cmd_measure(speaker, mic, iterations),
         Cmd::Create { name, boost, target_match, speaker, mic, iterations } => {
