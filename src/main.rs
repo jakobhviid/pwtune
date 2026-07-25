@@ -23,12 +23,15 @@ use ui::{ask, err, info, next_steps, ok, pick, pick_sections, run_cmd, slugify, 
 const REPO_URL: &str = "https://github.com/jakobhviid/pwtune";
 const AFTER_HELP: &str = concat!(
     "Repository: https://github.com/jakobhviid/pwtune (inspect the source there if needed)\n",
-    "LLM guide: run `pwtune llm` for a full machine-readable reference (every command + usage)."
+    "LLM guide: pass `--llm` for a full machine-readable reference (every command + usage)."
 );
 
 #[derive(Parser)]
 #[command(name = "pwtune", version, about = "Measure, build, and install PipeWire speaker EQ profiles.", after_help = AFTER_HELP, after_long_help = AFTER_HELP, arg_required_else_help = true)]
 struct Cli {
+    /// Print the full LLM-readable guide (every command + usage + repo link) and exit.
+    #[arg(long, global = true)]
+    llm: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -74,10 +77,6 @@ enum Cmd {
     Uninstall { name: Option<String> },
     /// Finalize a draft: rename it to <name>.calibrated.conf (frozen).
     Promote { name: Option<String> },
-    /// Print a full LLM-readable guide to stdout: every command + usage + a link to
-    /// the source repo. Same content as the man page, laid out plainly for an
-    /// LLM/agent to read and drive the tool from zero.
-    Llm,
     /// (dev) Analyze a sweep+recording pair and print the response; for validation.
     #[command(hide = true)]
     DevAnalyze { sweep: String, rec: String },
@@ -548,6 +547,12 @@ fn reset_sigpipe() {
 
 fn main() -> Result<()> {
     reset_sigpipe();
+    // `--llm` is a documentation flag like `--help`: works from anywhere, no
+    // subcommand needed, so intercept it before clap enforces one.
+    if std::env::args().skip(1).any(|a| a == "--llm") {
+        print!("{}", llm_guide());
+        return Ok(());
+    }
     let _ = ctrlc::set_handler(|| {
         eprintln!("\nCancelled.");
         std::process::exit(0);
@@ -571,10 +576,6 @@ fn main() -> Result<()> {
         }
         Cmd::Man => {
             clap_mangen::Man::new(Cli::command()).render(&mut std::io::stdout())?;
-            Ok(())
-        }
-        Cmd::Llm => {
-            print!("{}", llm_guide());
             Ok(())
         }
     }
