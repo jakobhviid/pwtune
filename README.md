@@ -103,10 +103,12 @@ you select as your output; audio routes through the EQ before reaching the real
 speaker.
 
 - **Portable target.** Instead of a hardcoded sink, each profile carries a
-  `# target-match:` line — matched against the sinks present at install time
-  (`node.name`, and the monitor's EDID name via `node.nick`). Display-audio sink
-  names differ per machine/GPU/bus, but a monitor's EDID name is stable, so one
-  profile follows the device across machines.
+  `# target-match:` line — a case-insensitive **regex** matched at install time
+  against each sink's full `pactl list sinks` block, so it can hit the
+  `node.name`, the description, or the monitor's EDID name (`node.nick`).
+  Display-audio sink names differ per machine/GPU/bus, but a monitor's EDID name
+  is stable, so one profile follows the device across machines. (Because it's a
+  regex, escape special characters for a literal match — see `WORKFLOWS.md`.)
 - **Coexist.** Each profile gets its own node name, so several can be installed at
   once (e.g. a laptop EQ'ing both its internal speakers and an external monitor);
   switch between them in your sound settings.

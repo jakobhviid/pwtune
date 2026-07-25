@@ -589,8 +589,8 @@ fn main() -> Result<()> {
 }
 
 /// A single self-contained, plain-text guide an LLM/agent can read to drive pwtune
-/// from zero: the full command reference (rendered from clap) followed by the
-/// README, plus the repo link for source inspection.
+/// from zero: the full command reference (rendered from clap), then the README,
+/// then the end-to-end workflows, plus the repo link for source inspection.
 fn llm_guide() -> String {
     let mut cmd = Cli::command();
     let mut out = String::new();
@@ -610,6 +610,9 @@ fn llm_guide() -> String {
 
     out.push_str("\n\n================================ GUIDE (README) ================================\n\n");
     out.push_str(include_str!("../README.md"));
+
+    out.push_str("\n\n================================ WORKFLOWS ================================\n\n");
+    out.push_str(include_str!("../WORKFLOWS.md"));
     if !out.ends_with('\n') {
         out.push('\n');
     }
