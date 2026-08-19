@@ -11,6 +11,14 @@ in this repository.
 - AI assistance is disclosed **once**, in the README's "AI disclosure" section —
   that is the only place it belongs. Keep it out of the commit history entirely.
 
+## Where the unfinished work is written down
+
+`ROADMAP.md` holds the work that is understood but not done, the decisions already
+taken and why, and the one thing that is not solvable. Read it before proposing
+changes to the measurement chain or the tuning defaults — several of those questions
+have been settled with reasons, and several others are waiting on a measurement rather
+than on an idea.
+
 ## Releases & versioning — auto-incremented from commit type
 
 CI cuts a release on every push to `main`, and the version is **derived
