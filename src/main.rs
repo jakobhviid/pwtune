@@ -651,10 +651,22 @@ fn cmd_uninstall(name: Option<String>) -> Result<()> {
         label_path.push((label, path));
     }
     let sections: Vec<(&str, Vec<String>)> = buckets.iter().map(|(h, v)| (*h, v.clone())).collect();
-    let order: Vec<String> = buckets.iter().flat_map(|(_, v)| v.clone()).collect();
+    // Only pwtune's own configs may be the Enter default. Everything in the other
+    // bucket is somebody's hand-written file, and this list is often exactly that one
+    // file — so defaulting to the head of the list offers to delete it on a bare
+    // Enter, or on the EOF a piped invocation produces.
+    let default = buckets[0].1.first().map(|x| x.as_str());
     let name = match name {
         Some(n) => n,
-        None => match pick_sections("Pick an EQ to uninstall", &sections, order.first().map(|x| x.as_str())) {
+        None if !ui::interactive() => {
+            err("uninstall needs a NAME when there is nobody to prompt.");
+            println!("  Deployed now:");
+            for (label, _) in &label_path {
+                println!("    {label}");
+            }
+            std::process::exit(1);
+        }
+        None => match pick_sections("Pick an EQ to uninstall", &sections, default) {
             Some(n) => n,
             None => {
                 warn("Nothing selected.");
@@ -670,6 +682,16 @@ fn cmd_uninstall(name: Option<String>) -> Result<()> {
     if !path.is_file() {
         err(&format!("'{name}' is not installed."));
         std::process::exit(1);
+    }
+    // A config pwtune did not write has its source somewhere else, or nowhere — there
+    // is no copy to reinstall from, so removing it cannot be undone.
+    if !buckets[0].1.contains(&name) {
+        warn(&format!("{} was not written by pwtune.", path.display()));
+        println!("  pwtune has no copy of it, so removing it cannot be undone.");
+        if !ask(&format!("Delete {}?", path.display()), "n").to_lowercase().starts_with('y') {
+            warn("Kept.");
+            return Ok(());
+        }
     }
     fs::remove_file(&path)?;
     ok(&format!("Removed {}", path.display()));
