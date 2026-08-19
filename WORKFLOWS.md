@@ -24,8 +24,8 @@ interactive prompts, so an agent can run the whole lifecycle non-interactively.
 - **Installing is a two-directory move.** `create` writes the profile into the
   **current folder**; `install` copies a resolved copy into
   `~/.config/pipewire/pipewire.conf.d/pwtune-<name>.conf` (the "deploy dir"),
-  restarts PipeWire, and makes it the default output. `uninstall` deletes that
-  deployed file. Your folder copy is the source of truth; the deploy dir is
+  restarts PipeWire if that file's contents changed, and makes it the default
+  output. `uninstall` deletes that deployed file and restarts. Your folder copy is the source of truth; the deploy dir is
   derived and disposable.
 
 ## Convention for agents
@@ -137,8 +137,9 @@ ear, not a finished result.
 ## W3 — Install a profile (`install`) and how target-match resolves
 
 `install` finds the profile's `# target-match:` line, resolves it against the
-sinks present **right now**, deploys the config, restarts PipeWire, and sets the
-EQ as the default output.
+sinks present **right now**, deploys the config, restarts PipeWire if the deployed
+file changed, and sets the EQ as the default output. Re-installing an unchanged
+profile leaves playback running, since reopening the PCM clicks on some amplifiers.
 
 ```sh
 pwtune install desk                    # resolve target-match, deploy, set default
@@ -317,3 +318,5 @@ send finished ones back there via PR.
 - The high-pass corner is **declared, not measured** — the mic cannot separate its own
   low-end rolloff from the driver's. A class is a conservative estimate; `--highpass`
   takes a real number when you have one.
+- `install` restarts PipeWire only when the deployed config differs from what is
+  already there, so re-installing an unchanged profile does not interrupt playback.

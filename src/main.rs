@@ -497,12 +497,29 @@ fn cmd_install(name: Option<String>, speaker_override: Option<String>) -> Result
     let text = fs::read_to_string(&path)?.replace("__TARGET_SINK__", &target);
     fs::create_dir_all(conf_d())?;
     let dest = conf_d().join(format!("{DEPLOY_PREFIX}{name}.conf"));
+    // A restart closes and reopens the PCM, which clicks audibly on some amplifiers,
+    // so it is tied to the deployed config actually changing.
+    let changed = fs::read_to_string(&dest).map(|old| old != text).unwrap_or(true);
     fs::write(&dest, text)?;
     ok(&format!("Installed '{name}' → {target}"));
-    info("Restarting PipeWire...");
-    restart_pipewire();
+    let mut restarted = false;
+    if changed {
+        info("Restarting PipeWire...");
+        restart_pipewire();
+        restarted = true;
+    } else {
+        info("Deployed config is already current — leaving PipeWire alone.");
+    }
     if let Some(node) = input_node(&path) {
-        if set_default_sink(&node) {
+        let mut set = set_default_sink(&node);
+        if !set && !restarted {
+            // The file was in place but its sink does not exist, so the chain is not
+            // loaded — worth the restart after all.
+            info("Filter chain isn't loaded yet — restarting PipeWire...");
+            restart_pipewire();
+            set = set_default_sink(&node);
+        }
+        if set {
             ok(&format!("Default output set to {node}"));
         } else {
             warn("Loaded, but couldn't set default — pick it in your sound settings.");
