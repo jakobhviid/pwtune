@@ -28,13 +28,28 @@ pub const DEPLOY_PREFIX: &str = "pwtune-";
 /// files the daemon never reads — and then blames the result on the user's sound
 /// settings. A relative `XDG_CONFIG_HOME` is ignored, as the spec requires.
 pub fn conf_d() -> PathBuf {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
+    let leaf = |base: PathBuf| base.join("pipewire").join("pipewire.conf.d");
+    let xdg = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config")
-        });
-    base.join("pipewire").join("pipewire.conf.d")
+        .map(leaf);
+    let home = leaf(PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config"));
+
+    // PipeWire falls back to ~/.config when the XDG path does not exist, so an
+    // existing directory wins: writing into a freshly created XDG directory would not
+    // just miss the daemon's current location, it would move it — and silently orphan
+    // whatever is already deployed under ~/.config.
+    match xdg {
+        Some(x) if x.is_dir() => x,
+        Some(x) => {
+            if home.is_dir() {
+                home
+            } else {
+                x
+            }
+        }
+        None => home,
+    }
 }
 
 fn cwd() -> PathBuf {
