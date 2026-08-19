@@ -11,7 +11,7 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use profile::{
     calibrated_names, calibrated_path, conf_d, description, draft_names, draft_path, find_profile,
-    input_node, preamp_band, profile_names, target_match, write_profile, Design, Tier,
+    input_node, preamp_bands, profile_names, target_match, write_profile, Design, Tier,
     DEPLOY_PREFIX,
 };
 use std::fs;
@@ -59,7 +59,10 @@ enum Cmd {
     /// Measure + generate a starting profile (<name>.draft.conf) in the current folder.
     Create {
         name: Option<String>,
-        #[arg(long)]
+        /// Makeup gain in dB (0-30). Emitted as high shelves with corners below the
+        /// audible band, split across as many nodes as it takes so none exceeds the
+        /// +20 dB a PipeWire control accepts.
+        #[arg(long, value_parser = parse_boost)]
         boost: Option<f64>,
         #[arg(long = "target-match")]
         target_match: Option<String>,
@@ -112,6 +115,20 @@ fn s(p: &Path) -> &str {
     p.to_str().unwrap_or("")
 }
 
+/// Makeup gain, validated. The figure that can overdrive a speaker deserves at least
+/// the checking the one that protects it already gets.
+fn parse_boost(v: &str) -> std::result::Result<f64, String> {
+    let f: f64 = v.parse().map_err(|_| format!("'{v}' is not a number of dB"))?;
+    if !(0.0..=profile::PREAMP_MAX_TOTAL).contains(&f) {
+        return Err(format!(
+            "makeup gain must be between 0 and {:.0} dB (got {f}); for more level use the \
+             speaker's own volume, which sits after everything",
+            profile::PREAMP_MAX_TOTAL
+        ));
+    }
+    Ok(f)
+}
+
 fn tmpdir() -> PathBuf {
     let d = std::env::temp_dir().join(format!("pwtune-{}", std::process::id()));
     let _ = fs::create_dir_all(&d);
@@ -132,7 +149,7 @@ fn assemble_chain(boost: f64, highpass: Option<f64>, bands: Vec<dsp::Band>) -> V
     if let Some(f) = highpass {
         chain.extend(dsp::highpass_bands(f));
     }
-    chain.extend(preamp_band(boost));
+    chain.extend(preamp_bands(boost));
     chain.extend(bands);
     chain
 }
@@ -334,7 +351,13 @@ fn cmd_create(
         warn("No name given — aborting.");
         return Ok(());
     }
-    let boost = boost.unwrap_or_else(|| ask("Makeup gain in dB (louder overall; 0 = none)", "0").parse().unwrap_or(0.0));
+    let boost = boost.unwrap_or_else(|| loop {
+        let answer = ask("Makeup gain in dB (louder overall; 0 = none)", "0");
+        match parse_boost(&answer) {
+            Ok(v) => return v,
+            Err(e) => eprintln!("  {e}"),
+        }
+    });
     let target = tmatch.unwrap_or_else(|| if !nick.is_empty() { nick.clone() } else { sp.clone() });
     let class = match class_arg.as_deref() {
         Some(n) => match speaker::by_name(n) {
@@ -346,17 +369,22 @@ fn cmd_create(
         },
         None if ui::interactive() => choose_class(speaker::detect(&sp, "", &nick)),
         None => {
-            let c = speaker::unbounded();
             info(&format!(
-                "No --class given and nothing to prompt — designing as '{}' ({}). Pass --class or --highpass to bound the low end.",
-                c.name,
-                c.corner_label()
+                "No --class given and nothing to prompt — no high-pass, and no band below {:.0} Hz. Pass --class or --highpass to say what this speaker can take.",
+                speaker::UNDECLARED_FLOOR
             ));
-            c
+            speaker::unbounded()
         }
     };
     let highpass = resolve_highpass(highpass_arg.as_deref(), class);
-    let lim = class.limits(highpass);
+    // A run that named neither a class nor a corner has asserted nothing about the
+    // speaker, so it gets the conservative floor rather than fullrange's.
+    let declared = class_arg.is_some() || highpass_arg.is_some();
+    let lim = if declared || ui::interactive() {
+        class.limits(highpass)
+    } else {
+        speaker::undeclared_limits()
+    };
     info(&format!("Profile '{name}': target-match='{target}', makeup +{boost} dB"));
     info(&format!("Class '{}': {}", class.name, class.corner_label()));
     println!("\nKeep the room quiet. Measuring to design a starting EQ...\n");

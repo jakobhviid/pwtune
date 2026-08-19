@@ -130,23 +130,51 @@ pub fn input_node(path: &PathBuf) -> Option<String> {
         .map(|m| m.as_str().to_string())
 }
 
-/// Makeup gain is one high shelf whose corner sits far below the audible band.
-/// A shelf reaches half its gain at its corner and the full amount about an octave
-/// above, so a 10 Hz corner lifts the whole band the user can hear by the requested
-/// number — flat within 0.1 dB above 60 Hz and exact from 100 Hz to Nyquist.
+/// Makeup gain is a high shelf whose corner sits below the audible band, so it lifts
+/// everything the listener can hear by the amount asked for. Protection of the driver
+/// belongs to the high-pass, not to this stage: one job per stage, so a corner low
+/// enough to be flat from 30 Hz up is the right one.
 pub const PREAMP_FREQ: f64 = 10.0;
 pub const PREAMP_Q: f64 = 0.7;
 
-/// The section makeup gain compiles to, or `None` when none was asked for.
-pub fn preamp_band(boost: f64) -> Option<Band> {
-    (boost > 0.0).then(|| Band {
-        freq: PREAMP_FREQ,
-        gain: boost,
-        q: PREAMP_Q,
-        kind: "bq_highshelf",
-        node: "preamp".to_string(),
-        note: format!("makeup gain: +{boost} dB across the audible band"),
-    })
+/// Most gain one node may carry.
+///
+/// PipeWire declares each builtin's `Gain` control with `max = 20.0` and clamps
+/// values read from a config against it, logging at info level and otherwise
+/// silently. Splitting the makeup gain across enough shelves to stay under that
+/// keeps a profile delivering the level it states, on every version. Two shelves
+/// carrying half each land within 0.05 dB of one shelf carrying the total, so the
+/// split costs nothing in the audible band.
+pub const PREAMP_MAX_PER_NODE: f64 = 18.0;
+
+/// Ceiling on the total, as a guard against a mistyped figure rather than a limit
+/// anyone should need to reach.
+pub const PREAMP_MAX_TOTAL: f64 = 30.0;
+
+/// The sections makeup gain compiles to — empty when none was asked for.
+pub fn preamp_bands(boost: f64) -> Vec<Band> {
+    if boost <= 0.0 {
+        return Vec::new();
+    }
+    let stages = (boost / PREAMP_MAX_PER_NODE).ceil().max(1.0) as usize;
+    let each = (boost / stages as f64 * 10.0).round() / 10.0;
+    (0..stages)
+        .map(|i| Band {
+            freq: PREAMP_FREQ,
+            gain: each,
+            q: PREAMP_Q,
+            kind: "bq_highshelf",
+            node: if stages == 1 { "preamp".to_string() } else { format!("preamp{}", i + 1) },
+            note: if stages == 1 {
+                format!("makeup gain: +{boost} dB across the audible band")
+            } else {
+                format!(
+                    "makeup gain: +{each} dB, stage {} of {stages} (+{boost} dB total;                      one node may carry at most +{PREAMP_MAX_PER_NODE:.0} dB)",
+                    i + 1
+                )
+            },
+        })
+        .collect()
 }
 
 /// How a profile was designed, recorded in its header so the file carries its own
@@ -280,7 +308,7 @@ mod tests {
 
     fn chain() -> Vec<Band> {
         let mut c = highpass_bands(100.0);
-        c.extend(preamp_band(6.0));
+        c.extend(preamp_bands(6.0));
         c.push(Band {
             freq: 150.0,
             gain: 4.5,

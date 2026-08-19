@@ -57,6 +57,19 @@ pub fn unbounded() -> &'static Class {
     CLASSES.last().expect("CLASSES is never empty")
 }
 
+/// Lowest band worth placing when nobody has declared anything at all.
+///
+/// Naming `fullrange` asserts the speaker reaches low, and that assertion is what
+/// makes a boost down there safe. A run that declared nothing has made no such
+/// assertion, so it gets no filter *and* no boost in the region a small driver
+/// cannot use — which is what "under-serving is recoverable" is supposed to mean.
+pub const UNDECLARED_FLOOR: f64 = 120.0;
+
+/// Bounds for a run where nothing was declared.
+pub fn undeclared_limits() -> Limits {
+    Limits { correct_from: UNDECLARED_FLOOR, ..Limits::default() }
+}
+
 pub fn by_name(name: &str) -> Option<&'static Class> {
     CLASSES.iter().find(|c| c.name.eq_ignore_ascii_case(name))
 }
@@ -74,11 +87,20 @@ impl Class {
         }
     }
 
-    /// The design bounds this class implies. Correction stops at the high-pass
-    /// corner: a boost below it fights the filter, and the filter is there because
-    /// the driver cannot use that band anyway.
+    /// The design bounds this class implies.
+    ///
+    /// Correction stops half an octave above the high-pass corner, not at it. A band
+    /// sitting on the corner undoes the filter outright — a +8 dB band at an 80 Hz
+    /// corner takes the response there from -3.0 dB to +5.0 dB and raises
+    /// pink-weighted 20-160 Hz energy by 5.3 dB, so the filter ends up worse than
+    /// absent. At 1.41x the corner a 4th-order response is within 0.3 dB of unity,
+    /// so a band there cannot meaningfully fight it.
     pub fn limits(&self, highpass: Option<f64>) -> Limits {
-        Limits { correct_from: highpass.unwrap_or(0.0), ..Limits::default() }
+        let floor = match highpass {
+            Some(f) => f * 2f64.powf(0.5),
+            None => 0.0,
+        };
+        Limits { correct_from: floor, ..Limits::default() }
     }
 }
 
@@ -150,10 +172,22 @@ mod tests {
         assert!(corners.windows(2).all(|w| w[0] > w[1]), "{corners:?} should descend");
     }
 
+    /// Half an octave of clearance above the corner, so no band can undo the filter.
     #[test]
-    fn correction_stops_at_the_high_pass_corner() {
-        let c = by_name("laptop-woofer").unwrap();
-        assert_eq!(c.limits(c.highpass).correct_from, 100.0);
+    fn correction_stops_above_the_high_pass_corner() {
+        for c in CLASSES.iter().filter(|c| c.highpass.is_some()) {
+            let corner = c.highpass.unwrap();
+            let floor = c.limits(c.highpass).correct_from;
+            assert!(floor > corner, "{}: floor {floor} must clear corner {corner}", c.name);
+            assert!((floor / corner - 2f64.sqrt()).abs() < 1e-9, "{}: half an octave", c.name);
+        }
+    }
+
+    /// Declaring nothing is not the same as declaring fullrange.
+    #[test]
+    fn an_undeclared_run_still_refuses_the_lowest_bands() {
+        assert_eq!(unbounded().limits(None).correct_from, 0.0);
+        assert!(undeclared_limits().correct_from >= 120.0);
     }
 
     const LAPTOP_SINK: &str =
