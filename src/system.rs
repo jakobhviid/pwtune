@@ -124,6 +124,23 @@ pub fn resolve_sink(pattern: &str) -> Vec<String> {
     hits
 }
 
+/// How many channels a sink carries, from its channel map.
+pub fn sink_channels(name: &str) -> Option<usize> {
+    let out = pactl(&["list", "sinks"]);
+    for chunk in out.split("\nSink #") {
+        if !chunk.lines().any(|l| l.trim() == format!("Name: {name}")) {
+            continue;
+        }
+        for line in chunk.lines() {
+            if let Some(map) = line.trim().strip_prefix("Channel Map:") {
+                let n = map.split(',').filter(|p| !p.trim().is_empty()).count();
+                return (n > 0).then_some(n);
+            }
+        }
+    }
+    None
+}
+
 pub fn get_default_sink() -> String { pactl(&["get-default-sink"]).trim().to_string() }
 pub fn set_default_sink(name: &str) -> bool {
     Command::new("pactl").args(["set-default-sink", name]).status().map(|s| s.success()).unwrap_or(false)

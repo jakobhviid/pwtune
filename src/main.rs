@@ -20,7 +20,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use system::{
     deployed_eq_configs, detect_mic, detect_speaker, get_default_sink, get_devices, play_and_record,
-    pattern_error, resolve_sink, restart_pipewire, set_default_sink, Device, Kind,
+    pattern_error, resolve_sink, restart_pipewire, set_default_sink, sink_channels, Device,
+    Kind,
 };
 use ui::{ask, err, info, next_steps, ok, pick, pick_sections, run_cmd, slugify, warn};
 
@@ -590,6 +591,16 @@ fn cmd_install(name: Option<String>, speaker_override: Option<String>) -> Result
             }
         }
     };
+    // The filter graph is stereo. On a sink with more channels the virtual sink is
+    // still stereo, so anything multichannel gets folded down into it and spread back
+    // out — surround silently becomes a downmix. Say so rather than let it be found.
+    if let Some(channels) = sink_channels(&target) {
+        if channels > 2 {
+            warn(&format!("{target} carries {channels} channels; this profile is stereo."));
+            println!("  Selecting it as your output downmixes surround to stereo and back.");
+            println!("  Leave it unselected for multichannel material, or EQ per-channel by hand.");
+        }
+    }
     let text = fs::read_to_string(&path)?.replace("__TARGET_SINK__", &target);
     fs::create_dir_all(conf_d())?;
     let dest = conf_d().join(format!("{DEPLOY_PREFIX}{name}.conf"));
