@@ -17,8 +17,12 @@ use crate::dsp::RATE;
 use rustfft::num_complex::Complex;
 use std::f64::consts::PI;
 
-/// Butterworth section Qs for a 4th-order response: two cascaded sections.
+/// Section Qs for a 4th-order response, as two cascaded sections. The pair chooses
+/// the alignment rather than the order: Butterworth is maximally flat into the corner
+/// and 3.01 dB down at it, Linkwitz-Riley is 6.02 dB down there and removes more of
+/// the excursion energy below it.
 pub const BUTTERWORTH_Q4: [f64; 2] = [0.541_196_100_146_197, 1.306_562_964_876_377];
+pub const LINKWITZ_RILEY_Q4: [f64; 2] = [std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2];
 
 /// A section normalized so `a0 == 1`.
 #[derive(Clone, Copy, Debug)]
@@ -164,6 +168,23 @@ mod tests {
         let hs = Biquad::highshelf(10.0, 0.7, 24.0);
         assert!(close(hs.magnitude_db(10.0), 12.0, 1e-6));
         assert!(close(hs.magnitude_db(1000.0), 24.0, 0.01));
+    }
+
+    /// The two alignments differ by exactly 3.01 dB at the corner, and Linkwitz-Riley
+    /// is the more protective of the two everywhere below it.
+    #[test]
+    fn the_two_alignments_differ_as_documented() {
+        let bw: Vec<Biquad> = BUTTERWORTH_Q4.iter().map(|&q| Biquad::highpass(100.0, q)).collect();
+        let lr: Vec<Biquad> =
+            LINKWITZ_RILEY_Q4.iter().map(|&q| Biquad::highpass(100.0, q)).collect();
+        assert!((cascade_db(&bw, 100.0) - -3.0103).abs() < 1e-3);
+        assert!((cascade_db(&lr, 100.0) - -6.0206).abs() < 1e-3);
+        for f in [20.0, 40.0, 60.0, 100.0] {
+            assert!(cascade_db(&lr, f) < cascade_db(&bw, f), "LR should cut more at {f} Hz");
+        }
+        for f in [1000.0, 10000.0] {
+            assert!((cascade_db(&lr, f)).abs() < 1e-3, "both are unity in the passband");
+        }
     }
 
     #[test]

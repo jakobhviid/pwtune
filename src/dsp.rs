@@ -7,7 +7,7 @@
 //! controls — so a measurement that assumed a fixed offset would compare the top of
 //! the reference sweep against silence.
 use anyhow::{anyhow, Result};
-use crate::biquad::{cascade_db, peak_gain_db, Biquad, BUTTERWORTH_Q4};
+use crate::biquad::{cascade_db, peak_gain_db, Biquad, BUTTERWORTH_Q4, LINKWITZ_RILEY_Q4};
 use rustfft::{num_complex::Complex, FftPlanner};
 use std::f64::consts::PI;
 
@@ -484,14 +484,64 @@ pub fn design_eq(freqs: &[f64], measured: &[f64], lim: Limits) -> Vec<Band> {
         .collect()
 }
 
-/// A 4th-order Butterworth high-pass at `corner`, as two cascaded sections.
+/// Which two-section alignment a 4th-order high-pass uses.
+///
+/// Butterworth is the default because it is what has been listened to. Linkwitz-Riley
+/// is the more protective choice — 6.02 dB down at the corner against 3.01, and it
+/// passes materially less excursion energy below it — and it is what vendor tuning
+/// data for at least one laptop chassis actually specifies. Which one sounds right is
+/// an ear question, so it is offered rather than decided.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Alignment {
+    Butterworth,
+    LinkwitzRiley,
+}
+
+impl Alignment {
+    pub fn qs(self) -> [f64; 2] {
+        match self {
+            Alignment::Butterworth => BUTTERWORTH_Q4,
+            Alignment::LinkwitzRiley => LINKWITZ_RILEY_Q4,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Alignment::Butterworth => "butterworth",
+            Alignment::LinkwitzRiley => "linkwitz-riley",
+        }
+    }
+
+    /// Attenuation at the corner, in dB.
+    pub fn corner_db(self) -> f64 {
+        match self {
+            Alignment::Butterworth => -3.01,
+            Alignment::LinkwitzRiley => -6.02,
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Alignment> {
+        match s.to_lowercase().replace('_', "-").as_str() {
+            "butterworth" | "bw" => Some(Alignment::Butterworth),
+            "linkwitz-riley" | "linkwitzriley" | "lr" | "lr4" => Some(Alignment::LinkwitzRiley),
+            _ => None,
+        }
+    }
+
+    pub fn names() -> &'static [&'static str] {
+        &["butterworth", "linkwitz-riley"]
+    }
+}
+
+/// A 4th-order high-pass at `corner`, as two cascaded sections.
 ///
 /// Below a driver's usable range, signal moves the cone without being heard, and the
 /// excursion costs headroom the audible band needs — amplifier protection responds
 /// to the peaks by pulling everything down. Removing that content is what lets the
 /// rest get louder, even though the filter only ever subtracts.
-pub fn highpass_bands(corner: f64) -> Vec<Band> {
-    BUTTERWORTH_Q4
+pub fn highpass_bands(corner: f64, align: Alignment) -> Vec<Band> {
+    align
+        .qs()
         .iter()
         .enumerate()
         .map(|(i, &q)| Band {
@@ -501,7 +551,9 @@ pub fn highpass_bands(corner: f64) -> Vec<Band> {
             kind: "bq_highpass",
             node: format!("highpass{}", i + 1),
             note: format!(
-                "high-pass {corner:.0} Hz, 4th-order Butterworth (section {} of 2)",
+                "high-pass {corner:.0} Hz, 4th-order {} ({:.2} dB at the corner), section {} of 2",
+                align.name(),
+                align.corner_db(),
                 i + 1
             ),
         })
@@ -546,7 +598,7 @@ mod tests {
         let lag = RATE as usize;
         let mut rec: Vec<i16> = vec![0; lag];
         rec.extend_from_slice(&sweep);
-        rec.extend(std::iter::repeat(0).take(RATE as usize + RATE as usize / 2));
+        rec.extend(std::iter::repeat_n(0, RATE as usize + RATE as usize / 2));
         write_wav(rec_path.to_str().unwrap(), &rec).unwrap();
 
         let (freqs, db) =
@@ -604,7 +656,7 @@ mod tests {
         write_wav(sp.to_str().unwrap(), &sweep).unwrap();
         let mut rec: Vec<i16> = vec![0; RATE as usize];
         rec.extend(signal.iter().map(|&v| (v * 32768.0).clamp(-32768.0, 32767.0) as i16));
-        rec.extend(std::iter::repeat(0).take(RATE as usize));
+        rec.extend(std::iter::repeat_n(0, RATE as usize));
         write_wav(rp.to_str().unwrap(), &rec).unwrap();
 
         let (freqs, db) = analyze_response(sp.to_str().unwrap(), rp.to_str().unwrap())

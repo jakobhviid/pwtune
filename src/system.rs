@@ -85,8 +85,23 @@ pub fn detect_mic(devs: &[Device]) -> Option<usize> {
     }
 }
 
+/// Why a target-match pattern cannot be used, if it cannot.
+///
+/// An unbalanced bracket makes a pattern match nothing, which is indistinguishable
+/// from a disconnected speaker unless the difference is reported — so a typo reads as
+/// "is that speaker connected?" and sends the user to check their cables.
+pub fn pattern_error(pattern: &str) -> Option<String> {
+    Regex::new(&format!("(?i){pattern}")).err().map(|e| {
+        e.to_string().lines().next().unwrap_or("invalid pattern").trim().to_string()
+    })
+}
+
 /// Sinks (excluding our own effect_* virtual sinks) whose full `pactl list sinks`
 /// block matches `pattern` case-insensitively — so node.nick / EDID name counts too.
+///
+/// The pattern is tested against a whole multi-line block and is compiled without
+/// `(?m)`, so `^` and `$` anchor to the block rather than to a line: `^alsa_output`
+/// never matches anything.
 pub fn resolve_sink(pattern: &str) -> Vec<String> {
     let out = pactl(&["list", "sinks"]);
     let re = match Regex::new(&format!("(?i){pattern}")) {
@@ -113,10 +128,6 @@ pub fn get_default_sink() -> String { pactl(&["get-default-sink"]).trim().to_str
 pub fn set_default_sink(name: &str) -> bool {
     Command::new("pactl").args(["set-default-sink", name]).status().map(|s| s.success()).unwrap_or(false)
 }
-pub fn set_default_source(name: &str) {
-    let _ = Command::new("pactl").args(["set-default-source", name]).status();
-}
-
 pub fn restart_pipewire() {
     let _ = Command::new("systemctl")
         .args(["--user", "restart", "pipewire", "pipewire-pulse"])
@@ -125,8 +136,11 @@ pub fn restart_pipewire() {
 }
 
 /// Play the sweep out `speaker` while recording from `mic` into `rec_path`.
+///
+/// Both ends are addressed explicitly, so the machine's default devices are left
+/// exactly as the user set them: `measure` reports that it changes nothing, and that
+/// has to include the default capture device.
 pub fn play_and_record(sweep: &str, rec_path: &str, speaker: &str, mic: &str) -> Result<()> {
-    set_default_source(mic);
     let mut rec = Command::new("parecord")
         .args([
             "--format=s16le",

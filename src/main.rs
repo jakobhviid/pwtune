@@ -11,7 +11,8 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use profile::{
     calibrated_names, calibrated_path, conf_d, description, draft_names, draft_path, find_profile,
-    input_node, preamp_bands, profile_names, target_match, write_profile, Design, Tier,
+    input_node, preamp_bands, profile_names, target_match, validate_name, write_profile,
+    Design, Tier,
     DEPLOY_PREFIX,
 };
 use std::fs;
@@ -19,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use system::{
     deployed_eq_configs, detect_mic, detect_speaker, get_default_sink, get_devices, play_and_record,
-    resolve_sink, restart_pipewire, set_default_sink, Device, Kind,
+    pattern_error, resolve_sink, restart_pipewire, set_default_sink, Device, Kind,
 };
 use ui::{ask, err, info, next_steps, ok, pick, pick_sections, run_cmd, slugify, warn};
 
@@ -73,10 +74,14 @@ enum Cmd {
         #[arg(long)]
         class: Option<String>,
         /// High-pass corner in Hz, or `none`. Overrides the class. Content below a
-        /// driver's usable range moves the cone without being heard and costs the
-        /// headroom the audible band needs.
+        /// driver's usable range moves the cone without being heard, and protection
+        /// reacts to the peaks by pulling everything down.
         #[arg(long)]
         highpass: Option<String>,
+        /// High-pass alignment: butterworth (default, 3.01 dB down at the corner) or
+        /// linkwitz-riley (6.02 dB down, passes less excursion energy below it).
+        #[arg(long = "highpass-align")]
+        highpass_align: Option<String>,
         #[arg(long)]
         speaker: Option<String>,
         #[arg(long)]
@@ -144,10 +149,15 @@ fn average(rows: &[Vec<f64>]) -> Vec<f64> {
 /// The graph a profile deploys, in order: protect the driver, set the level, then
 /// correct. The high-pass sits outside the band fit on purpose — it is there to
 /// remove content the driver cannot use, not to be corrected back.
-fn assemble_chain(boost: f64, highpass: Option<f64>, bands: Vec<dsp::Band>) -> Vec<dsp::Band> {
+fn assemble_chain(
+    boost: f64,
+    highpass: Option<f64>,
+    align: dsp::Alignment,
+    bands: Vec<dsp::Band>,
+) -> Vec<dsp::Band> {
     let mut chain = Vec::new();
     if let Some(f) = highpass {
-        chain.extend(dsp::highpass_bands(f));
+        chain.extend(dsp::highpass_bands(f, align));
     }
     chain.extend(preamp_bands(boost));
     chain.extend(bands);
@@ -338,6 +348,7 @@ fn cmd_create(
     tmatch: Option<String>,
     class_arg: Option<String>,
     highpass_arg: Option<String>,
+    align_arg: Option<String>,
     speaker_arg: Option<String>,
     mic: Option<String>,
     iters: usize,
@@ -350,6 +361,10 @@ fn cmd_create(
     if name.is_empty() {
         warn("No name given — aborting.");
         return Ok(());
+    }
+    if let Err(e) = validate_name(&name) {
+        err(&e.to_string());
+        std::process::exit(1);
     }
     let boost = boost.unwrap_or_else(|| loop {
         let answer = ask("Makeup gain in dB (louder overall; 0 = none)", "0");
@@ -377,6 +392,19 @@ fn cmd_create(
         }
     };
     let highpass = resolve_highpass(highpass_arg.as_deref(), class);
+    let align = match align_arg.as_deref() {
+        None => dsp::Alignment::Butterworth,
+        Some(a) => match dsp::Alignment::parse(a) {
+            Some(x) => x,
+            None => {
+                err(&format!(
+                    "Unknown --highpass-align '{a}'. Try: {}",
+                    dsp::Alignment::names().join(", ")
+                ));
+                std::process::exit(1);
+            }
+        },
+    };
     // A run that named neither a class nor a corner has asserted nothing about the
     // speaker, so it gets the conservative floor rather than fullrange's.
     let declared = class_arg.is_some() || highpass_arg.is_some();
@@ -386,7 +414,15 @@ fn cmd_create(
         speaker::undeclared_limits()
     };
     info(&format!("Profile '{name}': target-match='{target}', makeup +{boost} dB"));
-    info(&format!("Class '{}': {}", class.name, class.corner_label()));
+    info(&format!(
+        "Class '{}': {}{}",
+        class.name,
+        class.corner_label(),
+        match highpass {
+            Some(_) => format!(", {} alignment", align.name()),
+            None => String::new(),
+        }
+    ));
     println!("\nKeep the room quiet. Measuring to design a starting EQ...\n");
     let tmp = tmpdir();
     let (freqs, rows) = measure_passes(&sp, &mc, iters, &tmp, false);
@@ -397,14 +433,15 @@ fn cmd_create(
     }
     let avg = average(&rows);
     dsp::print_response(&freqs, &avg, "measured (average)");
-    let chain = assemble_chain(boost, highpass, dsp::design_eq(&freqs, &avg, lim));
+    let chain = assemble_chain(boost, highpass, align, dsp::design_eq(&freqs, &avg, lim));
     let sections = dsp::bands_to_sections(&chain);
     dsp::print_chain_response(&sections, "what this profile applies");
     report_headroom(&sections);
     report_saturation(&chain, lim);
     let eq_bands = chain.iter().filter(|b| b.node.starts_with("eq_band")).count();
     let out = draft_path(&name);
-    let design = Design { boost, class: class.name, highpass, target: &target };
+    let design =
+        Design { boost, class: class.name, highpass, alignment: align, target: &target };
     write_profile(&name, &chain, &design, &out)?;
     ok(&format!("Wrote draft {}  ({eq_bands} bands, +{boost} dB makeup)", out.display()));
     println!("  A starting point: the low/low-mid correction is measured; the top end");
@@ -527,6 +564,12 @@ fn cmd_install(name: Option<String>, speaker_override: Option<String>) -> Result
         }
     };
     let pat = speaker_override.clone().unwrap_or(m.clone());
+    if let Some(why) = pattern_error(&pat) {
+        err(&format!("'{pat}' is not a usable target-match pattern: {why}"));
+        println!("  It is a regex, so brackets and parentheses have to balance. For a literal");
+        println!("  match, escape the punctuation.");
+        std::process::exit(1);
+    }
     let hits = resolve_sink(&pat);
     if hits.is_empty() {
         err(&format!("No sink matches '{pat}' — is that speaker/monitor connected?"));
@@ -802,9 +845,19 @@ fn main() -> Result<()> {
     ui::set_verbosity(if cli.quiet { 0 } else if cli.verbose { 2 } else { 1 });
     match cli.cmd {
         Cmd::Measure { speaker, mic, iterations } => cmd_measure(speaker, mic, iterations),
-        Cmd::Create { name, boost, target_match, class, highpass, speaker, mic, iterations } => {
-            cmd_create(name, boost, target_match, class, highpass, speaker, mic, iterations)
-        }
+        Cmd::Create {
+            name,
+            boost,
+            target_match,
+            class,
+            highpass,
+            highpass_align,
+            speaker,
+            mic,
+            iterations,
+        } => cmd_create(
+            name, boost, target_match, class, highpass, highpass_align, speaker, mic, iterations,
+        ),
         Cmd::List => cmd_list(),
         Cmd::Install { name, speaker } => cmd_install(name, speaker),
         Cmd::Edit { name } => cmd_edit(name),

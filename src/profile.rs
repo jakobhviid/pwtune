@@ -6,7 +6,7 @@
 //!   * `foo.calibrated.conf` — frozen: edit/delete refuse it
 //! `promote` renames `foo.draft.conf` -> `foo.calibrated.conf`. The display name
 //! strips the marker (`foo`) and shows a tier tag. Any other `.conf` is ignored.
-use crate::dsp::Band;
+use crate::dsp::{Alignment, Band};
 use crate::ui::slugify;
 use anyhow::{anyhow, Result};
 use regex::Regex;
@@ -21,9 +21,20 @@ pub enum Tier {
 
 pub const DEPLOY_PREFIX: &str = "pwtune-";
 
+/// Where PipeWire reads a user's config fragments from.
+///
+/// It resolves `$XDG_CONFIG_HOME/pipewire` first and falls back to
+/// `$HOME/.config/pipewire`, so a tool that only ever looks at the second one writes
+/// files the daemon never reads — and then blames the result on the user's sound
+/// settings. A relative `XDG_CONFIG_HOME` is ignored, as the spec requires.
 pub fn conf_d() -> PathBuf {
-    let h = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(h).join(".config/pipewire/pipewire.conf.d")
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config")
+        });
+    base.join("pipewire").join("pipewire.conf.d")
 }
 
 fn cwd() -> PathBuf {
@@ -90,6 +101,44 @@ pub fn find_profile(name: &str) -> Option<(PathBuf, Tier)> {
         return Some((c, Tier::Calibrated));
     }
     None
+}
+
+/// Reject a name that would escape the folder, or collide with another profile.
+///
+/// Both node names come from `slugify`, which collapses every run of
+/// non-alphanumerics to `_`, so "my desk", "my-desk" and "My.Desk" all become
+/// `my_desk`. PipeWire never checks `node.name` for uniqueness: two chains carrying
+/// the same one both load, both appear as sinks under that name, and which one plays
+/// depends on registration order — non-deterministic across restarts. The name is
+/// also interpolated straight into both the draft filename and the deployed one.
+pub fn validate_name(name: &str) -> Result<()> {
+    if name.trim().is_empty() {
+        return Err(anyhow!("a profile needs a name"));
+    }
+    if name.contains('/') || name.contains('\\') || name.split('.').any(|p| p == "..") {
+        return Err(anyhow!(
+            "'{name}' is not a usable profile name: it becomes a filename in this folder \
+             and in PipeWire's config directory"
+        ));
+    }
+    if name.starts_with('.') {
+        return Err(anyhow!("'{name}' starts with a dot, which hides the profile"));
+    }
+    let slug = slugify(name);
+    if slug.is_empty() {
+        return Err(anyhow!("'{name}' has no letters or digits, so it cannot name a sink"));
+    }
+    for (other, _, _) in scan() {
+        if other != name && slugify(&other) == slug {
+            return Err(anyhow!(
+                "'{name}' and the existing profile '{other}' both become the sink name \
+                 'eq_{slug}'. PipeWire does not refuse a duplicate — both chains load and \
+                 which one you hear is down to startup order. Pick a name that differs by \
+                 more than punctuation."
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Where `create` writes, and the source `promote` renames.
@@ -184,6 +233,7 @@ pub struct Design<'a> {
     pub boost: f64,
     pub class: &'a str,
     pub highpass: Option<f64>,
+    pub alignment: Alignment,
     pub target: &'a str,
 }
 
@@ -241,9 +291,12 @@ pub fn write_profile(name: &str, chain: &[Band], d: &Design, out: &PathBuf) -> R
     let hp = match d.highpass {
         Some(f) => format!(
             "# highpass: {f:.0}\n\
-             #   4th-order Butterworth. Below here the driver moves without being\n\
-             #   heard, and the excursion costs headroom the audible band needs, so\n\
-             #   removing it leaves the rest louder.\n"
+             # highpass-align: {align}\n\
+             #   4th-order, {corner:.2} dB at the corner. Below here the driver moves\n\
+             #   without being heard, and protection reacts to the peaks by pulling\n\
+             #   everything down — so removing it can leave the rest louder.\n",
+            align = d.alignment.name(),
+            corner = d.alignment.corner_db(),
         ),
         None => String::new(),
     };
@@ -283,12 +336,19 @@ pub fn write_profile(name: &str, chain: &[Band], d: &Design, out: &PathBuf) -> R
          \x20               media.class = Audio/Sink\n\
          \x20               audio.channels = 2\n\
          \x20               audio.position = [ FL FR ]\n\
+         \x20               # WirePlumber's shipped suspend rule matches alsa_input.*\n\
+         \x20               # and alsa_output.* only, and applies through the ALSA\n\
+         \x20               # monitor, which never sees a filter-chain node. Without\n\
+         \x20               # this these nodes idle out after 5 s, and some amplifiers\n\
+         \x20               # click when the PCM reopens. 0 means never.\n\
+         \x20               session.suspend-timeout-seconds = 0\n\
          \x20           }}\n\
          \x20           playback.props = {{\n\
          \x20               node.name   = \"effect_output.eq_{slug}\"\n\
          \x20               node.target = \"__TARGET_SINK__\"\n\
          \x20               audio.channels = 2\n\
          \x20               audio.position = [ FL FR ]\n\
+         \x20               session.suspend-timeout-seconds = 0\n\
          \x20           }}\n\
          \x20       }}\n\
          \x20   }}\n\
@@ -304,10 +364,10 @@ pub fn write_profile(name: &str, chain: &[Band], d: &Design, out: &PathBuf) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsp::{highpass_bands, Band};
+    use crate::dsp::{highpass_bands, Alignment, Band};
 
     fn chain() -> Vec<Band> {
-        let mut c = highpass_bands(100.0);
+        let mut c = highpass_bands(100.0, Alignment::Butterworth);
         c.extend(preamp_bands(6.0));
         c.push(Band {
             freq: 150.0,
@@ -345,7 +405,8 @@ mod tests {
     fn write_to_temp(tag: &str) -> PathBuf {
         let out = std::env::temp_dir()
             .join(format!("pwtune-test-{}-{tag}.conf", std::process::id()));
-        let d = Design { boost: 6.0, class: "laptop-woofer", highpass: Some(100.0), target: "X1 Speaker" };
+        let d = Design { boost: 6.0, class: "laptop-woofer", highpass: Some(100.0),
+            alignment: Alignment::Butterworth, target: "X1 Speaker" };
         write_profile("desk", &chain(), &d, &out).expect("write");
         out
     }
@@ -384,7 +445,8 @@ mod tests {
     #[test]
     fn no_high_pass_means_no_high_pass_line() {
         let out = std::env::temp_dir().join(format!("pwtune-test-{}-nohp.conf", std::process::id()));
-        let d = Design { boost: 0.0, class: "fullrange", highpass: None, target: "Monitors" };
+        let d = Design { boost: 0.0, class: "fullrange", highpass: None,
+            alignment: Alignment::Butterworth, target: "Monitors" };
         write_profile("hifi", &[], &d, &out).unwrap();
         let txt = fs::read_to_string(&out).unwrap();
         assert!(!txt.contains("# highpass:"));
