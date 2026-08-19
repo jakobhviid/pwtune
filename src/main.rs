@@ -1,7 +1,9 @@
 //! pwtune — measure any speaker with any mic, build a PipeWire filter-chain
 //! EQ profile, and install/remove profiles. Rust port of the original Python tool.
+mod biquad;
 mod dsp;
 mod profile;
+mod speaker;
 mod system;
 mod ui;
 
@@ -9,7 +11,8 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use profile::{
     calibrated_names, calibrated_path, conf_d, description, draft_names, draft_path, find_profile,
-    input_node, profile_names, target_match, write_profile, Tier, DEPLOY_PREFIX,
+    input_node, preamp_band, profile_names, target_match, write_profile, Design, Tier,
+    DEPLOY_PREFIX,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -60,6 +63,17 @@ enum Cmd {
         boost: Option<f64>,
         #[arg(long = "target-match")]
         target_match: Option<String>,
+        /// Speaker class, which bounds how low the EQ pushes: laptop (high-pass
+        /// 150 Hz), laptop-woofer (100), desktop (80), bookshelf (50), fullrange
+        /// (none). These are conservative estimates, not measurements — use
+        /// --highpass if you know your driver's real limit.
+        #[arg(long)]
+        class: Option<String>,
+        /// High-pass corner in Hz, or `none`. Overrides the class. Content below a
+        /// driver's usable range moves the cone without being heard and costs the
+        /// headroom the audible band needs.
+        #[arg(long)]
+        highpass: Option<String>,
         #[arg(long)]
         speaker: Option<String>,
         #[arg(long)]
@@ -108,6 +122,98 @@ fn average(rows: &[Vec<f64>]) -> Vec<f64> {
     let n = rows.len() as f64;
     let len = rows[0].len();
     (0..len).map(|k| rows.iter().map(|r| r[k]).sum::<f64>() / n).collect()
+}
+
+/// The graph a profile deploys, in order: protect the driver, set the level, then
+/// correct. The high-pass sits outside the band fit on purpose — it is there to
+/// remove content the driver cannot use, not to be corrected back.
+fn assemble_chain(boost: f64, highpass: Option<f64>, bands: Vec<dsp::Band>) -> Vec<dsp::Band> {
+    let mut chain = Vec::new();
+    if let Some(f) = highpass {
+        chain.extend(dsp::highpass_bands(f));
+    }
+    chain.extend(preamp_band(boost));
+    chain.extend(bands);
+    chain
+}
+
+/// `--highpass` is three-valued: absent keeps the class's corner, `none` removes it,
+/// a number replaces it.
+fn resolve_highpass(arg: Option<&str>, class: &speaker::Class) -> Option<f64> {
+    match arg {
+        None => class.highpass,
+        Some(v) if v.eq_ignore_ascii_case("none") || v.eq_ignore_ascii_case("off") => None,
+        Some(v) => match v.parse::<f64>() {
+            Ok(f) if (10.0..=500.0).contains(&f) => Some(f),
+            _ => {
+                err(&format!("--highpass wants a frequency in Hz (10-500) or 'none', not '{v}'."));
+                std::process::exit(1);
+            }
+        },
+    }
+}
+
+/// Ask which speaker this is, showing the corner each class implies so a preset
+/// never reads as something pwtune measured — and so anyone who knows their driver's
+/// real limit can see to reach for `--highpass` instead.
+fn choose_class(detected: &speaker::Class) -> &'static speaker::Class {
+    eprintln!("\nWhat kind of speaker is this? It bounds how low the EQ pushes.");
+    for (i, c) in speaker::CLASSES.iter().enumerate() {
+        let mark = if c.name == detected.name { "   ← detected (press Enter)" } else { "" };
+        eprintln!("  {}) {:<14} {}{mark}", i + 1, c.name, c.corner_label());
+        eprintln!("       {}", c.look_for);
+    }
+    let def = speaker::CLASSES
+        .iter()
+        .position(|c| c.name == detected.name)
+        .map(|i| (i + 1).to_string())
+        .unwrap_or_else(|| "1".to_string());
+    loop {
+        let ans = ask("Pick a speaker class", &def);
+        if let Ok(n) = ans.parse::<usize>() {
+            if n >= 1 && n <= speaker::CLASSES.len() {
+                return &speaker::CLASSES[n - 1];
+            }
+        }
+        eprintln!("  Please enter a number from the list.");
+    }
+}
+
+/// Peak gain the chain applies, and therefore the digital headroom it needs below
+/// 0 dBFS. Reported rather than left to be discovered: clipping is inaudible on a
+/// spectrum plot, and an agent driving pwtune has no ears to catch it.
+fn report_headroom(chain: &[biquad::Biquad]) {
+    if chain.is_empty() {
+        return;
+    }
+    let (peak, at) = biquad::peak_gain_db(chain);
+    if peak <= 0.0 {
+        info(&format!("Peak chain gain {peak:+.1} dB at {at:.0} Hz — the chain only attenuates."));
+        return;
+    }
+    let line = format!(
+        "Peak chain gain {peak:+.1} dB at {at:.0} Hz — a full-scale signal there clips unless {peak:.1} dB stays free below 0 dBFS."
+    );
+    if peak > 3.0 {
+        warn(&line);
+    } else {
+        info(&line);
+    }
+}
+
+/// Bands sitting on the gain clamp, named. The realised curve falls short of the
+/// target there, and on a small speaker most of that gap is the mic's own rolloff
+/// and the driver's limit rather than anything a filter should chase.
+fn report_saturation(bands: &[dsp::Band], lim: dsp::Limits) {
+    let pinned = dsp::saturated_bands(bands, lim);
+    if pinned.is_empty() {
+        return;
+    }
+    let list: Vec<String> = pinned.iter().map(|f| format!("{f:.0}")).collect();
+    warn(&format!(
+        "At the gain limit: {} Hz — the measured gap there is wider than one band may correct.",
+        list.join(", ")
+    ));
 }
 
 fn choose_device(kind: &str, devs: &[Device], detected: Option<usize>) -> usize {
@@ -208,15 +314,18 @@ fn cmd_measure(speaker: Option<String>, mic: Option<String>, iters: usize) -> Re
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_create(
     name: Option<String>,
     boost: Option<f64>,
     tmatch: Option<String>,
-    speaker: Option<String>,
+    class_arg: Option<String>,
+    highpass_arg: Option<String>,
+    speaker_arg: Option<String>,
     mic: Option<String>,
     iters: usize,
 ) -> Result<()> {
-    let (sp, mc, nick) = resolve_devices(speaker, mic);
+    let (sp, mc, nick) = resolve_devices(speaker_arg, mic);
     let name = name.unwrap_or_else(|| {
         let def = if nick.is_empty() { "my-speaker".to_string() } else { slugify(&nick) };
         ask("\nName this profile", &def)
@@ -227,7 +336,29 @@ fn cmd_create(
     }
     let boost = boost.unwrap_or_else(|| ask("Makeup gain in dB (louder overall; 0 = none)", "0").parse().unwrap_or(0.0));
     let target = tmatch.unwrap_or_else(|| if !nick.is_empty() { nick.clone() } else { sp.clone() });
+    let class = match class_arg.as_deref() {
+        Some(n) => match speaker::by_name(n) {
+            Some(c) => c,
+            None => {
+                err(&format!("Unknown --class '{n}'. Try: {}", speaker::names().join(", ")));
+                std::process::exit(1);
+            }
+        },
+        None if ui::interactive() => choose_class(speaker::detect(&sp, "", &nick)),
+        None => {
+            let c = speaker::unbounded();
+            info(&format!(
+                "No --class given and nothing to prompt — designing as '{}' ({}). Pass --class or --highpass to bound the low end.",
+                c.name,
+                c.corner_label()
+            ));
+            c
+        }
+    };
+    let highpass = resolve_highpass(highpass_arg.as_deref(), class);
+    let lim = class.limits(highpass);
     info(&format!("Profile '{name}': target-match='{target}', makeup +{boost} dB"));
+    info(&format!("Class '{}': {}", class.name, class.corner_label()));
     println!("\nKeep the room quiet. Measuring to design a starting EQ...\n");
     let tmp = tmpdir();
     let (freqs, rows) = measure_passes(&sp, &mc, iters, &tmp, false);
@@ -238,10 +369,16 @@ fn cmd_create(
     }
     let avg = average(&rows);
     dsp::print_response(&freqs, &avg, "measured (average)");
-    let bands = dsp::design_eq(&freqs, &avg);
+    let chain = assemble_chain(boost, highpass, dsp::design_eq(&freqs, &avg, lim));
+    let sections = dsp::bands_to_sections(&chain);
+    dsp::print_chain_response(&sections, "what this profile applies");
+    report_headroom(&sections);
+    report_saturation(&chain, lim);
+    let eq_bands = chain.iter().filter(|b| b.node.starts_with("eq_band")).count();
     let out = draft_path(&name);
-    write_profile(&name, &bands, boost, &target, &out)?;
-    ok(&format!("Wrote draft {}  ({} bands, +{boost} dB makeup)", out.display(), bands.len()));
+    let design = Design { boost, class: class.name, highpass, target: &target };
+    write_profile(&name, &chain, &design, &out)?;
+    ok(&format!("Wrote draft {}  ({eq_bands} bands, +{boost} dB makeup)", out.display()));
     println!("  A starting point: the low/low-mid correction is measured; the top end");
     println!("  is a guess (the mic barely hears it) — refine it by ear.");
     next_steps(&[
@@ -266,6 +403,12 @@ fn cmd_list() -> Result<()> {
         let connected = target_match(&path).map(|m| !resolve_sink(&m).is_empty()).unwrap_or(false);
         let node = input_node(&path);
         let mut tags = vec![if tier == Tier::Calibrated { "calibrated" } else { "draft" }.to_string()];
+        if let Some(c) = profile::speaker_class(&path) {
+            tags.push(c);
+        }
+        if let Some(f) = profile::highpass(&path) {
+            tags.push(format!("hp {f:.0} Hz"));
+        }
         if conf_d().join(format!("{DEPLOY_PREFIX}{p}.conf")).is_file() {
             tags.push("installed".into());
         }
@@ -567,8 +710,8 @@ fn main() -> Result<()> {
     ui::set_verbosity(if cli.quiet { 0 } else if cli.verbose { 2 } else { 1 });
     match cli.cmd {
         Cmd::Measure { speaker, mic, iterations } => cmd_measure(speaker, mic, iterations),
-        Cmd::Create { name, boost, target_match, speaker, mic, iterations } => {
-            cmd_create(name, boost, target_match, speaker, mic, iterations)
+        Cmd::Create { name, boost, target_match, class, highpass, speaker, mic, iterations } => {
+            cmd_create(name, boost, target_match, class, highpass, speaker, mic, iterations)
         }
         Cmd::List => cmd_list(),
         Cmd::Install { name, speaker } => cmd_install(name, speaker),

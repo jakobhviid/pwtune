@@ -20,6 +20,14 @@ pub fn ok(m: &str) { if c_out() { println!("\x1b[1;32m✓ {m}\x1b[0m") } else { 
 pub fn warn(m: &str) { if c_out() { println!("\x1b[1;33m⚠ {m}\x1b[0m") } else { println!("⚠ {m}") } }
 pub fn err(m: &str) { if c_err() { eprintln!("\x1b[1;31m✗ {m}\x1b[0m") } else { eprintln!("✗ {m}") } }
 
+/// Whether there is someone to answer a prompt. A default offered in a menu is a
+/// suggestion a person can see and correct; the same default applied to a pipe is a
+/// choice nobody made, so callers whose default changes what the audio does check
+/// this first rather than reading an answer that EOF and a bare Enter both produce.
+pub fn interactive() -> bool {
+    io::stdin().is_terminal()
+}
+
 fn read_line() -> String {
     let mut s = String::new();
     match io::stdin().lock().read_line(&mut s) {

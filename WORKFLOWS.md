@@ -71,23 +71,62 @@ Measure, design a parametric EQ toward a flat target, and write
 
 ```sh
 cd ~/audio/profiles                              # where the .conf files should live
-pwtune create desk                               # measure → ./desk.draft.conf (prompts for boost, devices)
+pwtune create desk                               # measure → ./desk.draft.conf (prompts for boost, class, devices)
 pwtune create desk \
   --speaker <sink> --mic <source> \
-  --boost 0 --target-match "DELL U2720Q"         # fully non-interactive
+  --boost 0 --target-match "DELL U2720Q" \
+  --class bookshelf                              # fully non-interactive
 ```
 
 - **`NAME`** — omit it and pwtune proposes one (a slug of the monitor's EDID
   name, else `my-speaker`) and prompts. The name becomes the file prefix, the
   `node.description`, and the virtual-sink slug.
-- **`--boost <dB>`** (default `0`) — broadband digital makeup gain, added as two
-  shelf preamp stages of `boost/2` dB each. It has a **hard ceiling at 0 dBFS**:
-  past that it clips rather than getting louder. For clean loudness use the
-  speaker's/monitor's own volume; use `--boost` only to match levels between
-  profiles.
+- **`--boost <dB>`** (default `0`) — broadband digital makeup gain, one `preamp`
+  shelf whose corner sits below the audible band so the lift is flat across it. It
+  has a **hard ceiling at 0 dBFS**: past that it clips rather than getting louder.
+  For clean loudness use the speaker's/monitor's own volume; use `--boost` only to
+  match levels between profiles.
 - **`--target-match <string>`** — the pattern stored in the profile that
   `install` later resolves to a real sink (see W3). If omitted, `create`
   defaults it to the speaker's EDID nick when known, else its `node.name`.
+- **`--class <name>`** — how low the EQ may push: `laptop` (high-pass 150 Hz),
+  `laptop-woofer` (100), `desktop` (80), `bookshelf` (50), `fullrange` (none). A
+  class adds a 4th-order Butterworth high-pass at its corner and stops the designer
+  placing any band below it.
+- **`--highpass <Hz|none>`** — overrides the class corner outright. Pass a number
+  when you know the driver's real limit, or `none` to leave the low end alone.
+
+### Why a class, and why you have to say
+
+Every driver has a floor below which it moves air nowhere: the cone travels, nothing
+is heard, and the excursion consumes headroom the audible band needs. Amplifier
+protection responds to those peaks by pulling **everything** down, so removing
+content below the floor can leave a speaker audibly louder even though a high-pass
+only subtracts.
+
+An uncalibrated mic cannot locate that floor — its own rolloff and the driver's are
+the same shape in a magnitude sweep — so the corner is declared rather than measured,
+and the per-class numbers are **conservative estimates**. `--highpass` is the way to
+supply a real one.
+
+Declaring nothing declares no floor. An interactive `create` offers the detected
+class as the Enter-default; a non-interactive one with no `--class` designs
+unbounded rather than applying a corner nobody chose.
+
+### What `create` reports
+
+EQ bands overlap, so a cascade delivers more than the sum of the gains its bands
+request. `create` fits the gains against the response the chain actually produces and
+then prints:
+
+- **the realised curve** — what the profile does, per octave centre;
+- **peak chain gain and where** — the headroom the chain needs below 0 dBFS before a
+  full-scale signal at that frequency clips;
+- **bands pinned at the gain limit**, if any — the target there sits further away than
+  one filter may travel, which on a small speaker is mostly the mic's own rolloff.
+
+These are the only numeric quality signals available without listening, which makes
+them the ones an agent should read.
 
 The low / low-mid correction is measured and trustworthy; the top end is a guess
 (the mic barely hears it). Treat the draft as a **starting point** to refine by
@@ -165,10 +204,10 @@ pwtune list
 
 - **`●` / `○`** — whether the profile's target-match resolves to a sink that is
   **connected right now**.
-- **Tags** — `draft` or `calibrated`; `installed` if a
-  `pwtune-<name>.conf` exists in the deploy dir; `active output` if the EQ sink
-  is the current default. Scope your next action from these.
-
+- **Tags** — `draft` or `calibrated`; the `speaker-class` and high-pass corner the
+  profile records; `installed` if a `pwtune-<name>.conf` exists in the deploy dir;
+  `active output` if the EQ sink is the current default. Scope your next action from
+  these.
 ---
 
 ## W6 — Remove a deployed EQ (`uninstall`)
@@ -199,7 +238,7 @@ Which flags eliminate every prompt, per command:
 | Command | Fully non-interactive with… | Notes |
 |---------|-----------------------------|-------|
 | `measure` | `--speaker <sink> --mic <source> [--iterations N]` | needs real audio hardware |
-| `create` | `NAME --speaker --mic --boost --target-match` | needs real audio hardware |
+| `create` | `NAME --speaker --mic --boost --target-match --class` | needs real audio hardware; without `--class` a non-interactive run designs unbounded |
 | `install` | `NAME --speaker <pattern>` | prompts only if `<pattern>` resolves to **>1** sink |
 | `edit` | `NAME` | still opens `$EDITOR` — interactive by nature |
 | `promote` | `NAME` | asks only if the calibrated file already exists |
@@ -232,6 +271,8 @@ parts that matter:
 
 ```conf
 # target-match: DELL U2720Q          ← the regex install resolves (W3)
+# speaker-class: bookshelf           ← what bounded the design
+# highpass: 50                       ← corner of the 4th-order Butterworth, when present
 …
 capture.props  = { node.name = "effect_input.eq_desk"  media.class = Audio/Sink … }   ← the sink you select as output
 playback.props = { node.name = "effect_output.eq_desk" node.target = "__TARGET_SINK__" … }  ← the real speaker
@@ -250,6 +291,12 @@ from `pactl list short sinks`, drop the file into
   two tools (e.g. `pwtune` **and** a provisioning script) drops two files whose
   filter chains share a node name — PipeWire will conflict. Pick one path per
   machine.
+- **Clicks when a chain resumes.** WirePlumber's shipped suspend rule matches
+  `alsa_input.*` / `alsa_output.*`, so a filter chain's `effect_*` nodes follow the
+  default 5-second idle timeout and some amplifiers click when the PCM reopens.
+  Adding `session.suspend-timeout-seconds = 0` to `capture.props` and
+  `playback.props` keeps them awake — at the cost of holding the real sink open too,
+  which a laptop pays for in battery.
 
 ---
 
@@ -267,3 +314,6 @@ send finished ones back there via PR.
   low / low-mid bands.
 - The auto-EQ is a **calibration aid, not a magic button**: it gets you a sane
   starting curve, then you refine by ear and re-measure.
+- The high-pass corner is **declared, not measured** — the mic cannot separate its own
+  low-end rolloff from the driver's. A class is a conservative estimate; `--highpass`
+  takes a real number when you have one.

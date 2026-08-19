@@ -69,7 +69,7 @@ pwtune <command> [options]
 | Command | What it does |
 |---------|--------------|
 | `measure` | Play a sweep, record it, print the frequency response. Changes nothing. |
-| `create [name]` | Measure, then write a starting profile `./<name>.draft.conf`. Prompts for name/boost/devices. |
+| `create [name]` | Measure, then write a starting profile `./<name>.draft.conf`. Prompts for name/boost/class/devices. |
 | `list` | List the profiles in this folder (draft / calibrated) and their install state. |
 | `install [name]` | Resolve the profile's target sink, deploy it, make it the default output. |
 | `edit [name]` | Open a **draft** in `$EDITOR` (calibrated are frozen). |
@@ -80,7 +80,8 @@ pwtune <command> [options]
 Every verb runs with no arguments too: it enumerates what's available, defaults to
 the sensible choice for this machine, and prompts for the rest. Common options for
 `measure`/`create`: `--speaker <sink>`, `--mic <source>`, `--iterations N`;
-`create` also takes `--boost <dB>` (default `0`) and `--target-match <string>`.
+`create` also takes `--boost <dB>` (default `0`), `--target-match <string>`,
+`--class <name>`, and `--highpass <Hz|none>`.
 
 ## A typical session
 
@@ -95,6 +96,38 @@ pwtune install desk          # re-deploy and re-listen
 pwtune promote desk          # happy → freeze it as desk.calibrated.conf
 git add desk.calibrated.conf && git commit -m "desk speaker EQ"
 ```
+
+## Speaker class: how low to push
+
+Correcting a response means asking the driver for more output somewhere, and every
+driver has a floor below which it moves air nowhere: the cone travels, nothing is
+heard, and the excursion eats headroom the audible band needs. Amplifier protection
+reacts to those peaks by pulling *everything* down — which is why removing content
+below the floor can leave a speaker **audibly louder**, even though a high-pass only
+ever subtracts.
+
+An uncalibrated mic cannot find that floor. Its own low-end rolloff and the driver's
+look identical in a magnitude sweep. So `create` asks you to declare it, from
+something you can see:
+
+| `--class` | what it looks like | high-pass |
+|-----------|--------------------|-----------|
+| `laptop` | ultrabook or tablet, no separate woofer grilles | 150 Hz |
+| `laptop-woofer` | larger chassis with dedicated woofers or quad speakers | 100 Hz |
+| `desktop` | small powered speakers or a soundbar, 2–3″ driver | 80 Hz |
+| `bookshelf` | 5″ woofer or larger | 50 Hz |
+| `fullrange` | floorstanders, monitors, or any system with a subwoofer | none |
+
+A class does two things: it adds a 4th-order Butterworth high-pass at that corner,
+and it stops the EQ placing any band below it — a boost underneath a high-pass only
+fights the filter.
+
+**The corners are conservative estimates, not measurements.** If you know your
+driver's real limit — a datasheet, a vendor tuning file, your own ears — pass
+`--highpass <Hz>`, which overrides the class; `--highpass none` leaves the low end
+alone. Naming no class declares no floor, which is right for anything that genuinely
+reaches low and wrong for a laptop, so pick one when it matters. A non-interactive
+run with no `--class` declares no floor rather than guessing at one.
 
 ## How profiles work
 
@@ -116,10 +149,11 @@ speaker.
   two different tools (e.g. `pwtune` and a separate provisioning script) drops two
   files whose filter chains share a node name — PipeWire will conflict. Pick one
   install path per machine.
-- **Makeup gain is broadband and digital.** `--boost` adds shelf stages that lift
-  the whole spectrum. It has a hard ceiling at 0 dBFS — past that it clips rather
-  than getting louder, so for clean loudness use the speaker's/monitor's own
-  volume. Raise/lower the `preamp` `Gain` values to taste.
+- **Makeup gain is broadband and digital.** `--boost` adds one `preamp` shelf whose
+  corner sits below the audible band, so it lifts everything you can hear by the
+  amount asked for. It has a hard ceiling at 0 dBFS — past that it clips rather than
+  getting louder, so for clean loudness use the speaker's/monitor's own volume.
+  Raise/lower the `preamp` `Gain` to taste.
 
 ## Notes / limitations
 
@@ -128,6 +162,13 @@ speaker.
 - Keep the room quiet and the mic close to (and pointed at) the speaker.
 - The measurement passes through whatever EQ is currently active, so you can
   measure "before" (no profile installed) vs "after" to see the effect.
+- EQ bands overlap, so a chain delivers more than the sum of the gains its bands
+  request. `create` fits the gains against the response the cascade actually
+  produces, prints that realised curve, and reports the peak gain — the headroom the
+  chain needs below 0 dBFS before a full-scale signal clips.
+- A band pinned at its gain limit is reported. That means the target sits further
+  away than one filter may travel, and on a small speaker most of that gap is the
+  mic's own rolloff rather than anything worth correcting.
 
 ## History
 
