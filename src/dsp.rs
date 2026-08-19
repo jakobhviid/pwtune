@@ -99,9 +99,20 @@ const REGULARIZATION: f64 = 1e-6;
 const IR_WINDOW: f64 = 0.4;
 /// Seconds kept before the arrival, so a slightly early onset is not clipped.
 const IR_PRE: f64 = 0.005;
-/// How far the arrival must stand above the noise floor, as a ratio. A recording
-/// with no sweep in it lands near 4-5; a real measurement is in the hundreds.
-const MIN_ARRIVAL: f64 = 8.0;
+/// How far the arrival must stand above the noise floor, as a multiple of what noise
+/// alone would produce.
+///
+/// The peak-to-RMS ratio of `n` Gaussian samples is about `sqrt(2 ln n)` — near 5 for
+/// the lengths here — so the bar has to be set against that rather than at a fixed
+/// number, or it drifts with the length of the recording. A real measurement clears
+/// it by an order of magnitude; a recording with no sweep in it does not clear it at
+/// all.
+const MIN_ARRIVAL_MARGIN: f64 = 1.5;
+
+/// The peak-to-RMS ratio noise alone would give over `n` samples.
+fn noise_peak_ratio(n: usize) -> f64 {
+    (2.0 * (n.max(2) as f64).ln()).sqrt()
+}
 /// Smoothing width, as a fraction of an octave either side.
 const SMOOTH_OCTAVE: f64 = 1.0 / 6.0;
 
@@ -196,11 +207,13 @@ pub fn analyze_response(sweep_path: &str, rec_path: &str) -> Result<Option<(Vec<
         return Ok(None);
     }
     let (ir, confidence) = impulse_response(&sweep, &rec);
-    if confidence < MIN_ARRIVAL {
+    let floor = noise_peak_ratio(ir.len()) * MIN_ARRIVAL_MARGIN;
+    if confidence < floor {
         return Err(anyhow!(
-            "no sweep in the recording: the strongest arrival is only {confidence:.1}x the noise \
-             floor (needs {MIN_ARRIVAL:.0}x). Is the speaker actually playing, and is the mic in \
-             front of it?"
+            "no sweep in the recording: the strongest arrival is {confidence:.1}x the noise \
+             floor, and noise alone reaches {:.1}x. Is the speaker actually playing, is the mic \
+             in front of it, and is anything muted?",
+            noise_peak_ratio(ir.len())
         ));
     }
     let arrival = ir
@@ -686,6 +699,68 @@ mod tests {
             worst.0,
             worst.1
         );
+    }
+
+    /// Deterministic noise, so the threshold tests do not depend on a random seed.
+    fn noise(n: usize, amplitude: f64) -> Vec<f64> {
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        (0..n)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                ((state >> 11) as f64 / (1u64 << 53) as f64 - 0.5) * 2.0 * amplitude
+            })
+            .collect()
+    }
+
+    fn write_pair(tag: &str, rec: &[f64]) -> (std::path::PathBuf, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("pwtune-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (sp, rp) = (dir.join("sweep.wav"), dir.join("rec.wav"));
+        write_wav(sp.to_str().unwrap(), &gen_sweep_i16()).unwrap();
+        let pcm: Vec<i16> =
+            rec.iter().map(|&v| (v * 32768.0).clamp(-32768.0, 32767.0) as i16).collect();
+        write_wav(rp.to_str().unwrap(), &pcm).unwrap();
+        (sp, rp)
+    }
+
+    /// A recording with no sweep in it is refused, rather than returning a curve made
+    /// of room noise. This is the check that would have caught the analysis comparing
+    /// a reference against silence.
+    #[test]
+    fn a_recording_without_a_sweep_is_refused() {
+        let n = gen_sweep_i16().len() + RATE as usize;
+        let (sp, rp) = write_pair("noiseonly", &noise(n, 0.05));
+        let err = analyze_response(sp.to_str().unwrap(), rp.to_str().unwrap())
+            .expect_err("noise alone must not measure as a response");
+        assert!(err.to_string().contains("no sweep"), "{err}");
+        let _ = std::fs::remove_dir_all(sp.parent().unwrap());
+    }
+
+    /// And a real recording is not refused for being noisy. At 20 dB SNR — poor for a
+    /// measurement — the arrival still clears the bar with room to spare, and the
+    /// response still comes back flat.
+    #[test]
+    fn a_noisy_but_real_recording_is_accepted() {
+        let sweep = gen_sweep_i16();
+        let lag = RATE as usize;
+        let mut rec = vec![0.0f64; lag];
+        rec.extend(sweep.iter().map(|&v| v as f64 / 32768.0));
+        rec.extend(std::iter::repeat_n(0.0, RATE as usize));
+        for (r, n) in rec.iter_mut().zip(noise(usize::MAX.min(1 << 24), 0.07)) {
+            *r += n;
+        }
+        let (sp, rp) = write_pair("noisy", &rec);
+        let (freqs, db) = analyze_response(sp.to_str().unwrap(), rp.to_str().unwrap())
+            .unwrap()
+            .expect("long enough");
+        let vals: Vec<f64> = DISPLAY_FREQS.iter().map(|&f| value_at(&freqs, &db, f)).collect();
+        let spread = vals.iter().cloned().fold(f64::MIN, f64::max)
+            - vals.iter().cloned().fold(f64::MAX, f64::min);
+        println!("  noisy-recording spread across the display band: {spread:.2} dB");
+        assert!(spread < 3.0, "a 20 dB SNR recording should still read flat, got {spread:.2} dB");
+        let _ = std::fs::remove_dir_all(sp.parent().unwrap());
     }
 
     /// A response that sits `deficit` dB below the target below `corner`, and on it

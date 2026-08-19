@@ -42,14 +42,36 @@ Gated on a trustworthy measurement. Once one exists:
   conservative — all sit below the likely driver fs, so they under-protect rather than
   over-protect, which is the safe direction — but they are guesses and are documented
   as such.
-- **High-pass alignment default.** `--highpass-align` offers `butterworth` (default,
-  3.01 dB at the corner) and `linkwitz-riley` (6.02 dB, and materially less excursion
-  energy below it). The general argument favours LR4: the corners are deliberately
-  conservative, so a wrong one is more likely too low than too high, and LR4 gives
-  margin precisely where the estimate is weakest. The only evidence pointing the other
-  way is a single A/B on a single machine, which is why the default has not moved.
-  Settle it by A/B-ing both with a working measurement behind them; flipping it is a
-  one-line change plus a doc line.
+- **High-pass alignment.** Settled, and recorded here so it is not reopened without
+  new information. `--highpass-align` offers `butterworth` (default) and
+  `linkwitz-riley`; the default stays Butterworth.
+
+  Linkwitz-Riley exists to solve a crossover problem that a protective high-pass does
+  not have. Its defining property — two cascaded identical Butterworth sections, 6 dB
+  down at the corner — is what makes a complementary low-pass and high-pass sum to
+  flat, in phase, through a crossover region. A protective filter has nothing summing
+  with it, so that virtue is inapplicable, and "LR is standard for crossovers" does
+  not transfer. For a standalone filter the conventional choice is Butterworth,
+  because maximally-flat passband is the right criterion when nothing sums with it.
+
+  What the literature is firm about is *order*, not alignment: below fs a sealed
+  driver's displacement per volt is constant, so 12 dB/octave merely cancels the
+  excursion rise and you need steeper to reduce it — which is why 24 dB/octave is the
+  standard subsonic filter. Both candidates are 4th order, so that criterion is
+  already met. Beyond it, the variable that governs protection is corner placement
+  relative to fs and Xmax, which is what `--class` and `--highpass` set.
+
+  The two are not corner-shifts of each other: the closest Butterworth match to LR4 at
+  100 Hz is 106 Hz and still 2.1 dB out, because LR4 has a broader, earlier knee —
+  more attenuation near the corner, slightly less far below it. Pink-weighted, LR4
+  passes about 43% less sub-corner energy (−2.45 dB), constant across corners, and the
+  two agree within 0.5 dB above twice the corner. So the whole difference is roughly
+  one octave wide, and bending the knee to buy 2.45 dB is compensating in the wrong
+  variable when the corner is right there and is measurable.
+
+  LR4 remains available and is the right choice where vendor data specifies it, as it
+  does for the ThinkPad chassis this grew out of — though that filter sits inside a
+  full dynamics chain rather than standing alone.
 
 ### Bound the correction range at the top by measurement quality
 The designer places bands wherever the plan allows, with no check that the
