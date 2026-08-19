@@ -1,10 +1,15 @@
 //! Speaker classes: the envelope a design is allowed to work inside.
 //!
-//! Correcting a response means asking a driver for more output at some frequency,
-//! and every driver has a floor below which it moves air nowhere and only heats up.
-//! An uncalibrated mic cannot find that floor — its own rolloff and the driver's
-//! look identical in a magnitude sweep — so the floor is *declared* here instead,
-//! from something the owner can see: the size and kind of the speaker.
+//! Correcting a response means asking a driver for more output at some frequency, and
+//! every driver has a floor below which it moves air nowhere and only heats up.
+//!
+//! No magnitude sweep can find that floor, however well the microphone is calibrated,
+//! because the floor is a *mechanical* limit: excursion, thermal capacity, and the
+//! trip point of whatever protection sits in front of the driver. A driver's −20 dB
+//! point is not its safe-operating point, and a small-signal response says nothing
+//! about either. So the floor is *declared* here instead, from something the owner can
+//! see: the size and kind of the speaker. (Measuring it needs a different experiment —
+//! a two-level sweep, or distortion against frequency — not a better microphone.)
 //!
 //! These corners are conservative starting envelopes, not measurements. The corner
 //! is shown next to every class so it reads as the estimate it is, and

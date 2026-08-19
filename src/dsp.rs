@@ -535,10 +535,11 @@ impl Alignment {
 
 /// A 4th-order high-pass at `corner`, as two cascaded sections.
 ///
-/// Below a driver's usable range, signal moves the cone without being heard, and the
-/// excursion costs headroom the audible band needs — amplifier protection responds
-/// to the peaks by pulling everything down. Removing that content is what lets the
-/// rest get louder, even though the filter only ever subtracts.
+/// Below a driver's usable range, signal moves the cone without being heard. The chain
+/// is: amplitude drives displacement and current, protection detects it, and protection
+/// responds by reducing gain *broadband*. So removing that content can leave the rest
+/// louder even though the filter only subtracts — at levels where protection is
+/// engaging. Quieter than that, a high-pass is simply quieter.
 pub fn highpass_bands(corner: f64, align: Alignment) -> Vec<Band> {
     align
         .qs()

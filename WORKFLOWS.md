@@ -95,19 +95,23 @@ pwtune create desk \
   placing any band below it.
 - **`--highpass <Hz|none>`** — overrides the class corner outright. Pass a number
   when you know the driver's real limit, or `none` to leave the low end alone.
+- **`--highpass-align <name>`** — `butterworth` (default, 3.01 dB down at the corner)
+  or `linkwitz-riley` (6.02 dB down, passing less excursion energy below it). Recorded
+  in the profile header.
 
 ### Why a class, and why you have to say
 
-Every driver has a floor below which it moves air nowhere: the cone travels, nothing
-is heard, and the excursion consumes headroom the audible band needs. Amplifier
-protection responds to those peaks by pulling **everything** down, so removing
-content below the floor can leave a speaker audibly louder even though a high-pass
-only subtracts.
+Every driver has a floor below which it moves air nowhere: the cone travels and
+nothing is heard. Amplitude drives displacement, protection detects it, and protection
+responds by reducing gain **broadband** — so at levels where protection is engaging,
+removing content below the floor can leave a speaker audibly louder even though a
+high-pass only subtracts. Quieter than that, it is simply quieter.
 
-An uncalibrated mic cannot locate that floor — its own rolloff and the driver's are
-the same shape in a magnitude sweep — so the corner is declared rather than measured,
-and the per-class numbers are **conservative estimates**. `--highpass` is the way to
-supply a real one.
+No magnitude sweep locates that floor, however good the mic, because the floor is a
+**mechanical** limit: excursion, heat, and the protection's trip point. A driver's
+−20 dB point is not its safe-operating point. So the corner is declared rather than
+measured, and the per-class numbers are **conservative estimates**. `--highpass`
+supplies a real one when you have it.
 
 Declaring nothing declares no floor. An interactive `create` offers the detected
 class as the Enter-default; a non-interactive one with no `--class` designs
@@ -115,9 +119,11 @@ unbounded rather than applying a corner nobody chose.
 
 ### What `create` reports
 
-EQ bands overlap, so a cascade delivers more than the sum of the gains its bands
-request. `create` fits the gains against the response the chain actually produces and
-then prints:
+The response is recovered by deconvolving the sweep, which locates the playback delay
+rather than assuming one, and only the *shape* is used — an uncalibrated mic cannot
+give you absolute level. EQ bands then overlap, so a cascade delivers more than the sum
+of the gains its bands request. `create` fits the gains against the response the chain
+actually produces, holds the cascade's peak inside a budget, and prints:
 
 - **the realised curve** — what the profile does, per octave centre;
 - **peak chain gain and where** — the headroom the chain needs below 0 dBFS before a
@@ -247,7 +253,7 @@ Which flags eliminate every prompt, per command:
 | Command | Fully non-interactive with… | Notes |
 |---------|-----------------------------|-------|
 | `measure` | `--speaker <sink> --mic <source> [--iterations N]` | needs real audio hardware |
-| `create` | `NAME --speaker --mic --boost --target-match --class` | needs real audio hardware; without `--class` a non-interactive run designs unbounded |
+| `create` | `NAME --speaker --mic --boost --target-match --class [--highpass --highpass-align]` | needs real audio hardware; without `--class` **or** `--highpass` a non-interactive run adds no filter and places no band below 120 Hz |
 | `install` | `NAME --speaker <pattern>` | prompts only if `<pattern>` resolves to **>1** sink |
 | `edit` | `NAME` | still opens `$EDITOR` — interactive by nature |
 | `promote` | `NAME` | asks only if the calibrated file already exists |
@@ -300,12 +306,13 @@ from `pactl list short sinks`, drop the file into
   two tools (e.g. `pwtune` **and** a provisioning script) drops two files whose
   filter chains share a node name — PipeWire will conflict. Pick one path per
   machine.
-- **Clicks when a chain resumes.** WirePlumber's shipped suspend rule matches
-  `alsa_input.*` / `alsa_output.*`, so a filter chain's `effect_*` nodes follow the
-  default 5-second idle timeout and some amplifiers click when the PCM reopens.
-  Adding `session.suspend-timeout-seconds = 0` to `capture.props` and
-  `playback.props` keeps them awake — at the cost of holding the real sink open too,
-  which a laptop pays for in battery.
+- **Idle suspension is off.** Generated profiles set
+  `session.suspend-timeout-seconds = 0` on both ends. WirePlumber's shipped suspend
+  rule matches `alsa_input.*` / `alsa_output.*` and is applied through the ALSA
+  monitor, which never sees a filter-chain node, so without this these nodes idle out
+  after 5 seconds and some amplifiers click when the PCM reopens. Where a distro ships
+  that rule the ALSA node is already pinned, so the extra cost is the graph's own
+  wakeups.
 
 ---
 
@@ -323,8 +330,8 @@ send finished ones back there via PR.
   low / low-mid bands.
 - The auto-EQ is a **calibration aid, not a magic button**: it gets you a sane
   starting curve, then you refine by ear and re-measure.
-- The high-pass corner is **declared, not measured** — the mic cannot separate its own
-  low-end rolloff from the driver's. A class is a conservative estimate; `--highpass`
-  takes a real number when you have one.
+- The high-pass corner is **declared, not measured** — it is a mechanical limit, which
+  no magnitude sweep shows at any microphone quality. A class is a conservative
+  estimate; `--highpass` takes a real number when you have one.
 - `install` restarts PipeWire only when the deployed config differs from what is
   already there, so re-installing an unchanged profile does not interrupt playback.

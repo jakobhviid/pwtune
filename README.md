@@ -80,8 +80,8 @@ pwtune <command> [options]
 Every verb runs with no arguments too: it enumerates what's available, defaults to
 the sensible choice for this machine, and prompts for the rest. Common options for
 `measure`/`create`: `--speaker <sink>`, `--mic <source>`, `--iterations N`;
-`create` also takes `--boost <dB>` (default `0`), `--target-match <string>`,
-`--class <name>`, and `--highpass <Hz|none>`.
+`create` also takes `--boost <dB>` (`0`–`30`, default `0`), `--target-match <string>`,
+`--class <name>`, `--highpass <Hz|none>`, and `--highpass-align <name>`.
 
 ## A typical session
 
@@ -100,15 +100,16 @@ git add desk.calibrated.conf && git commit -m "desk speaker EQ"
 ## Speaker class: how low to push
 
 Correcting a response means asking the driver for more output somewhere, and every
-driver has a floor below which it moves air nowhere: the cone travels, nothing is
-heard, and the excursion eats headroom the audible band needs. Amplifier protection
-reacts to those peaks by pulling *everything* down — which is why removing content
-below the floor can leave a speaker **audibly louder**, even though a high-pass only
-ever subtracts.
+driver has a floor below which it moves air nowhere: the cone travels and nothing is
+heard. Amplitude drives displacement, protection detects it, and protection responds by
+reducing gain *broadband* — which is why, **at levels where protection is engaging**,
+removing content below the floor can leave a speaker audibly louder even though a
+high-pass only subtracts. Below those levels it is simply quieter.
 
-An uncalibrated mic cannot find that floor. Its own low-end rolloff and the driver's
-look identical in a magnitude sweep. So `create` asks you to declare it, from
-something you can see:
+No magnitude sweep can find that floor, however good the microphone, because the floor
+is a **mechanical** limit — excursion, heat, and the trip point of the protection in
+front of the driver. A driver's −20 dB point is not its safe-operating point. So
+`create` asks you to declare it, from something you can see:
 
 | `--class` | what it looks like | high-pass |
 |-----------|--------------------|-----------|
@@ -118,9 +119,11 @@ something you can see:
 | `bookshelf` | 5″ woofer or larger | 50 Hz |
 | `fullrange` | floorstanders, monitors, or any system with a subwoofer | none |
 
-A class does two things: it adds a 4th-order Butterworth high-pass at that corner,
-and it stops the EQ placing any band below it — a boost underneath a high-pass only
-fights the filter.
+A class does two things: it adds a 4th-order high-pass at that corner, and it stops the
+EQ placing any band within half an octave above it — a boost that close only fights the
+filter. `--highpass-align` picks the alignment: `butterworth` (the default, 3.01 dB down
+at the corner) or `linkwitz-riley` (6.02 dB down, passing less excursion energy below
+it).
 
 **The corners are conservative estimates, not measurements.** If you know your
 driver's real limit — a datasheet, a vendor tuning file, your own ears — pass
@@ -149,11 +152,12 @@ speaker.
   two different tools (e.g. `pwtune` and a separate provisioning script) drops two
   files whose filter chains share a node name — PipeWire will conflict. Pick one
   install path per machine.
-- **Makeup gain is broadband and digital.** `--boost` adds one `preamp` shelf whose
-  corner sits below the audible band, so it lifts everything you can hear by the
-  amount asked for. It has a hard ceiling at 0 dBFS — past that it clips rather than
-  getting louder, so for clean loudness use the speaker's/monitor's own volume.
-  Raise/lower the `preamp` `Gain` to taste.
+- **Makeup gain is broadband and digital.** `--boost` adds `preamp` shelves whose
+  corners sit below the audible band, so they lift everything you can hear by the
+  amount asked for. PipeWire accepts at most +20 dB on one control and clamps quietly
+  past that, so the gain is split across as many shelves as it takes. It also has a
+  hard ceiling at 0 dBFS — past that it clips rather than getting louder, so for clean
+  loudness use the speaker's/monitor's own volume.
 
 ## Notes / limitations
 
@@ -163,9 +167,12 @@ speaker.
 - The measurement passes through whatever EQ is currently active, so you can
   measure "before" (no profile installed) vs "after" to see the effect.
 - EQ bands overlap, so a chain delivers more than the sum of the gains its bands
-  request. `create` fits the gains against the response the cascade actually
-  produces, prints that realised curve, and reports the peak gain — the headroom the
-  chain needs below 0 dBFS before a full-scale signal clips.
+  request. `create` fits the gains against the response the cascade actually produces,
+  holds its peak inside a budget, prints the realised curve, and reports that peak —
+  the headroom the chain needs below 0 dBFS before a full-scale signal clips.
+- The response is recovered by deconvolving the sweep, so the measurement finds the
+  playback delay itself rather than assuming one. Only the *shape* is used: an
+  uncalibrated mic cannot give you absolute level.
 - A band pinned at its gain limit is reported. That means the target sits further
   away than one filter may travel, and on a small speaker most of that gap is the
   mic's own rolloff rather than anything worth correcting.
