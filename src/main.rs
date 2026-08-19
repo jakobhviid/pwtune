@@ -389,6 +389,30 @@ fn cmd_create(
     Ok(())
 }
 
+/// Deployed pwtune configs with no source profile in this folder.
+///
+/// PipeWire loads every `.conf` in its config dir, so one of these is still loaded,
+/// still in the output picker and still feeding a speaker, with nothing here tying
+/// it to a file. Reported rather than removed: the deploy dir is machine-wide while
+/// pwtune is folder-scoped, so a profile installed from another folder is a normal
+/// state, not a mistake to clean up.
+fn report_orphans(local: &[String]) {
+    let orphans: Vec<String> = deployed_eq_configs()
+        .into_iter()
+        .filter(|(_, _, kind)| matches!(kind, Kind::Managed))
+        .map(|(label, _, _)| label)
+        .filter(|l| !local.contains(l))
+        .collect();
+    if orphans.is_empty() {
+        return;
+    }
+    warn(&format!(
+        "Deployed, with no profile here: {} — installed from another folder, or its source was renamed or deleted.",
+        orphans.join(", ")
+    ));
+    println!("  Each still loads and still appears as an output. Remove one with {}.", run_cmd("uninstall", ""));
+}
+
 fn cmd_list() -> Result<()> {
     let names = profile_names();
     if names.is_empty() {
@@ -420,6 +444,7 @@ fn cmd_list() -> Result<()> {
     }
     println!("\n  ● speaker connected now    ○ not connected");
     println!("  draft = editable work in progress   ·   shipped = finalized (frozen)");
+    report_orphans(&names);
     next_steps(&[
         ("Install one", format!("{}  (pick from the list)", run_cmd("install", ""))),
         ("Create a new one", run_cmd("create", "")),

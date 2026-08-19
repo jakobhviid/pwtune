@@ -209,6 +209,14 @@ pwtune list
   profile records; `installed` if a `pwtune-<name>.conf` exists in the deploy dir;
   `active output` if the EQ sink is the current default. Scope your next action from
   these.
+- **Orphans.** `list` also names any `pwtune-*.conf` in the deploy dir with no
+  profile in this folder. PipeWire loads every config it finds, so such a chain is
+  still loaded and still offered as an output — expected if you installed it from
+  another folder, worth clearing with `uninstall` if its source was renamed or
+  deleted. `list` reports them and changes nothing: the deploy dir is machine-wide
+  while pwtune is folder-scoped, so pruning from here would delete another folder's
+  work.
+
 ---
 
 ## W6 — Remove a deployed EQ (`uninstall`)
