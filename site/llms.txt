@@ -1,0 +1,53 @@
+# pwtune
+
+> pwtune measures any speaker with any microphone, builds a PipeWire filter-chain EQ profile from the result, and installs and removes profiles. A folder-scoped command-line tool for Linux.
+
+Measure any speaker with any microphone, then build and install a PipeWire EQ profile from the result. The complete reference, for people and LLMs, is built into the tool: run `pwtune --llm`.
+pwtune is one of the software projects by Jakob Hviid, all listed at https://jakob.hviid.phd/software/ (for LLMs: https://jakob.hviid.phd/llms.txt).
+
+## What it does
+
+- **Measure what a speaker does**: `pwtune measure` plays a logarithmic sine sweep out a speaker, records it back through a mic and prints the frequency response. It averages `--iterations` passes (3 by default) and changes nothing.
+- **A starting EQ, written for you**: `pwtune create desk` measures, designs a parametric EQ toward a target curve and writes `./desk.draft.conf`. `--class`, from `laptop` to `fullrange`, declares how low the speaker may be pushed and adds a 4th-order high-pass at that corner.
+- **Profiles that follow the device**: Each profile is a PipeWire filter-chain config that creates a virtual sink. Its `target-match` pattern is matched at install time against each sink, including a monitor's EDID name, so one profile follows the device across machines.
+- **Made for scripts and agents**: Every verb takes a name and flags that answer its prompts, so the whole lifecycle can run non-interactively. `--quiet` and `NO_COLOR=1` keep the output clean, and `pwtune --llm` prints the whole guide.
+
+## Install
+
+Homebrew, on Linux. For x86_64 and arm64. On x86_64 it pours a prebuilt binary, so no compiler is needed. The tap is trusted once first, as Homebrew 6 and later ask.
+
+```sh
+brew trust --tap jakobhviid/tap
+brew install jakobhviid/tap/pwtune
+```
+
+Or one line, without Homebrew. No compiler and no root: downloads the prebuilt binary for your architecture to `~/.local/bin` (set `PWTUNE_BIN_DIR` to choose another folder).
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jakobhviid/pwtune/main/install.sh | sh
+```
+
+Or build from source. Needs Rust. The binary lands in `./target/release/pwtune`.
+
+```sh
+cargo build --release
+```
+
+It needs PipeWire. pwtune uses PipeWire's `pactl`, `paplay` and `parecord`; PipeWire is the default audio server on most modern distros. Nothing else is needed: the sweep, the analysis and the EQ design are built into the binary.
+
+```sh
+```
+
+## Docs
+
+- [README](https://raw.githubusercontent.com/jakobhviid/pwtune/main/README.md): every command, the speaker classes and how profiles work
+- [WORKFLOWS.md](https://raw.githubusercontent.com/jakobhviid/pwtune/main/WORKFLOWS.md): end-to-end recipes, and the flags that drive each command without prompts
+
+## Optional
+
+- [Project page](https://jakob.hviid.phd/pwtune/): the page this file accompanies
+- [Source](https://github.com/jakobhviid/pwtune): MIT licensed
+- [Releases](https://github.com/jakobhviid/pwtune/releases)
+- [pipewire-speaker-profiles](https://github.com/jakobhviid/pipewire-speaker-profiles): ready-made profiles for specific devices
+- [All software by Jakob Hviid](https://jakob.hviid.phd/software/)
+- [Jakob Hviid's site, for LLMs](https://jakob.hviid.phd/llms.txt)
