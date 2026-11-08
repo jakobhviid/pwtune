@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- pwtune's icon: a tuning fork; the response is wavy before it and flat after. The navy tile is shared by every tool's icon; the canonical copy of
+       each icon is site/icon.svg in its repository (jakobhviid.github.io/_software-template/README.md). -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0d3a5f"/><stop offset="1" stop-color="#002642"/></linearGradient>
+
+  </defs>
+  <rect x="2" y="2" width="124" height="124" rx="28" fill="url(#tile)"/>
+  <rect x="2.5" y="2.5" width="123" height="123" rx="27.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+<path d="M10 64 C16 42 24 42 30 64 C36 86 42 86 48 64 C54 48 60 56 64 56 H118" fill="none" stroke="#6cc4d9" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M50 22 V62 C50 74 78 74 78 62 V22" fill="none" stroke="#f3efe4" stroke-width="8" stroke-linecap="round"/>
+  <path d="M64 72 V108" stroke="#f3efe4" stroke-width="8" stroke-linecap="round"/>
+</svg>

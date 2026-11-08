@@ -1,3 +1,5 @@
+<img src="site/icon.svg" alt="" width="96" align="right">
+
 # pwtune
 
 Measure any speaker with any microphone, build a [PipeWire](https://pipewire.org/)
