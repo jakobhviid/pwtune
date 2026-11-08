@@ -1,0 +1,146 @@
+<!doctype html>
+<!-- pwtune's project page at jakob.hviid.phd/pwtune, published from site/ by .github/workflows/pages.yml. The layout and
+     style.css are shared by every command-line tool's page; the canonical copy is in
+     jakobhviid.github.io/_software-template/. Only the words and examples here are pwtune's own. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pwtune: measure a speaker and build a PipeWire EQ profile</title>
+  <meta name="description" content="pwtune measures any speaker with any microphone, builds a PipeWire filter-chain EQ profile from the result, and installs and removes profiles. A folder-scoped command-line tool for Linux.">
+  <link rel="canonical" href="https://jakob.hviid.phd/pwtune/">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <nav class="bar">
+      <span class="crumbs"><a href="https://jakob.hviid.phd/">Jakob Hviid</a><span class="sep">/</span><a href="https://jakob.hviid.phd/software/">Software</a><span class="sep">/</span><strong>pwtune</strong></span>
+      <span class="links"><a href="#install">Install</a><a href="https://github.com/jakobhviid/pwtune">GitHub</a></span>
+    </nav>
+
+    <header class="hero">
+      <h1>pwtune</h1>
+      <p class="tagline">Measure any speaker with any microphone, then build and install a PipeWire EQ profile from the result.</p>
+      <pre class="command"><code>brew trust --tap jakobhviid/tap</code><code>brew install jakobhviid/tap/pwtune</code></pre>
+      <p class="actions">
+        <a class="button" href="#install">Install</a>
+        <a class="button ghost" href="https://github.com/jakobhviid/pwtune#readme">Read the README</a>
+      </p>
+      <p class="platforms">Linux, x86_64 and arm64 · needs PipeWire · MIT licensed</p>
+    </header>
+
+    <main>
+      <section id="what">
+        <h2>What it does</h2>
+        <p class="section-lead">pwtune works on the <code>.conf</code> files in the folder you run it in, like a linter
+          or formatter. A profile's state is its filename: <code>desk.draft.conf</code> is a draft you can edit,
+          <code>desk.calibrated.conf</code> is frozen, and <code>promote</code> is the rename between them. The
+          generated EQ is a starting point: trust the low and low-mid bands, and use your ears above about 1–2 kHz.</p>
+        <div class="features">
+          <div class="feature">
+            <h3>Measure what a speaker does</h3>
+            <p><code>pwtune measure</code> plays a logarithmic sine sweep out a speaker, records it back through a mic
+              and prints the frequency response. It averages <code>--iterations</code> passes (3 by default) and
+              changes nothing.</p>
+          </div>
+          <div class="feature">
+            <h3>A starting EQ, written for you</h3>
+            <p><code>pwtune create desk</code> measures, designs a parametric EQ toward a target curve and writes
+              <code>./desk.draft.conf</code>. <code>--class</code>, from <code>laptop</code> to
+              <code>fullrange</code>, declares how low the speaker may be pushed and adds a 4th-order high-pass at
+              that corner.</p>
+          </div>
+          <div class="feature">
+            <h3>Profiles that follow the device</h3>
+            <p>Each profile is a PipeWire filter-chain config that creates a virtual sink. Its
+              <code>target-match</code> pattern is matched at install time against each sink, including a
+              monitor's EDID name, so one profile follows the device across machines.</p>
+          </div>
+          <div class="feature">
+            <h3>Made for scripts and agents</h3>
+            <p>Every verb takes a name and flags that answer its prompts, so the whole lifecycle can run
+              non-interactively. <code>--quiet</code> and <code>NO_COLOR=1</code> keep the output clean, and
+              <code>pwtune --llm</code> prints the whole guide.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="look">
+        <h2>A first look</h2>
+        <p class="section-lead"><code>list</code> changes nothing. It shows one line per profile in the current folder:
+          <code>●</code> when its speaker is connected right now, then its tags: draft or calibrated, installed,
+          active output.</p>
+<pre><code><span class="dim">$</span> cd ~/audio/profiles
+<span class="dim">$</span> pwtune list
+  <span class="ok">●</span> desk        Desk speakers            [calibrated · installed · active output]
+  <span class="dim">○</span> tv          Living-room TV           [draft]</code></pre>
+      </section>
+
+      <section id="install">
+        <h2>Install</h2>
+        <div class="install-step">
+          <h3>Homebrew, on Linux</h3>
+          <p>For x86_64 and arm64. On x86_64 it pours a prebuilt binary, so no compiler is needed. The tap is trusted once first, as Homebrew 6 and later ask.</p>
+          <pre class="command"><code>brew trust --tap jakobhviid/tap</code><code>brew install jakobhviid/tap/pwtune</code></pre>
+        </div>
+        <div class="install-step">
+          <h3>Or one line, without Homebrew</h3>
+          <p>No compiler and no root: downloads the prebuilt binary for your architecture to
+            <code>~/.local/bin</code> (set <code>PWTUNE_BIN_DIR</code> to choose another folder).</p>
+          <pre class="command"><code>curl -fsSL https://raw.githubusercontent.com/jakobhviid/pwtune/main/install.sh | sh</code></pre>
+        </div>
+        <div class="install-step">
+          <h3>Or build from source</h3>
+          <p>Needs Rust. The binary lands in <code>./target/release/pwtune</code>.</p>
+          <pre class="command"><code>cargo build --release</code></pre>
+        </div>
+        <div class="install-step">
+          <h3>It needs PipeWire</h3>
+          <p>pwtune uses PipeWire's <code>pactl</code>, <code>paplay</code> and <code>parecord</code>; PipeWire is the
+            default audio server on most modern distros. Nothing else is needed: the sweep, the analysis and the EQ
+            design are built into the binary.</p>
+        </div>
+      </section>
+
+      <section id="docs">
+        <h2>Documentation</h2>
+        <ul class="docs">
+          <li><a href="https://github.com/jakobhviid/pwtune#readme">README</a>: every command, the speaker classes and
+            how profiles work</li>
+          <li><a href="https://github.com/jakobhviid/pwtune/blob/main/WORKFLOWS.md">WORKFLOWS.md</a>: end-to-end
+            recipes, and the flags that drive each command without prompts</li>
+          <li><a href="https://github.com/jakobhviid/pipewire-speaker-profiles">pipewire-speaker-profiles</a>:
+            ready-made profiles for specific devices</li>
+          <li><a href="https://github.com/jakobhviid/pwtune/releases">Releases</a></li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      <p>pwtune is open source under the MIT licence.</p>
+      <p><strong>AI disclosure.</strong> Parts of this project were written with the assistance of AI coding agents.
+        All changes are reviewed by the maintainer.</p>
+      <p>One of the <a href="https://jakob.hviid.phd/software/">software projects</a> by
+        <a href="https://jakob.hviid.phd/">Jakob Hviid</a>. All of them install from the
+        <a href="https://github.com/jakobhviid/homebrew-tap">jakobhviid/tap</a> Homebrew tap.</p>
+    </footer>
+  </div>
+
+  <script>
+    // A copy button on every command block; a block of several commands copies them all, one per line.
+    for (const block of document.querySelectorAll("pre.command")) {
+      const button = document.createElement("button");
+      button.className = "copy";
+      button.type = "button";
+      button.textContent = "Copy";
+      button.addEventListener("click", async () => {
+        const lines = [...block.querySelectorAll("code")].map((code) => code.textContent.trim());
+        await navigator.clipboard.writeText(lines.join("\n"));
+        button.textContent = "Copied";
+        setTimeout(() => (button.textContent = "Copy"), 1500);
+      });
+      block.appendChild(button);
+    }
+  </script>
+</body>
+</html>
