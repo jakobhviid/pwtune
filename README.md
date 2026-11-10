@@ -189,8 +189,8 @@ speaker, as a single self-contained Rust binary (no Python/NumPy/SciPy runtime).
 
 ## AI disclosure
 
-Parts of this codebase were written with the assistance of AI coding agents
-(Claude Code, opencode, and others). All changes were reviewed by the maintainer.
+Parts of this codebase were written with the assistance of AI coding agents. All
+changes were reviewed by the maintainer.
 
 ## License
 
